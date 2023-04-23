@@ -1,0 +1,54 @@
+name: Node CI
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 0 * * *
+  push:
+    branches:
+      - master
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: github.event.repository.owner.id == github.event.sender.id || ! github.event.sender.id
+    steps:
+      - uses: actions/checkout@master
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Get Latest CRX
+        run: |
+          remoteVersion=$(curl -s https://chrome.google.com/webstore/detail/aiprm-for-chatgpt/ojnbohmppadfgpejeebfnmnknjdlckgj |grep -oE "meta itemprop=\"version\" content=\"[0-9\.]+\""|grep -oE "[0-9\.]+")
+          localVersion=$(cat update.xml|grep -oE "version=\"9[0-9\.]+\""|sed 's/9//'|grep -oE "[0-9\.]+")
+          echo NEW_VERSION=$remoteVersion >> $GITHUB_ENV
+          if [ $(./verComp.sh $localVersion $remoteVersion) -eq 2 ]; then
+            echo ""
+            echo "Downloading $remoteVersion ..."
+            mkdir new;
+            wget -O new/a.zip "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=96.0.4664.55&acceptformat=crx2,crx3&x=id%3Dojnbohmppadfgpejeebfnmnknjdlckgj%26uc"
+            (cd new;unzip a.zip||true;rm -fr a.zip)
+            echo UPGRAED=$(./deal.sh new $remoteVersion) >> $GITHUB_ENV
+          fi
+      - name: npm install, build
+        if: env.UPGRAED == '1'
+        env:
+          PRIVATE_KEY: ${{ secrets.buildPem }}
+        run: |
+          npm install crx3
+          cat <<< $PRIVATE_KEY > ../build.pem
+          npx crx3 -p ../build.pem -o AIPRM.crx -x update.xml --crxURL https://raw.githubusercontent.com/tofuliang/AIPRM/master/AIPRM.crx src
+      - name: Set git identity
+        if: env.UPGRAED == '1'
+        run: |
+          git config --global user.email "tofuliang@gmail.com"
+          git config --global user.name "tofuliang"
+          git add AIPRM.crx update.xml src
+          git commit -m "update crx to ${NEW_VERSION}"
+          git push
+      - name: 失败调试
+        uses: P3TERX/ssh2actions@main
+        if: ${{ failure() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
