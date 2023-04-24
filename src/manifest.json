@@ -1,40 +1,68 @@
 {
-  "action": {
-     "default_title": "Open ChatGPT"
-  },
-  "background": {
-     "service_worker": "background.js",
-     "type": "module"
-  },
-  "content_scripts": [ {
-     "js": [ "content_script.js" ],
-     "matches": [ "https://chat.openai.com/*" ]
-  } ],
-  "description": "AIPRM adds a list of curated prompt templates for SEO, SaaS and more to ChatGPT. Try today.",
-  "externally_connectable": {
-     "matches": [ "https://*.aiprm.com:*/*" ]
-  },
-  "icons": {
-     "1024": "icons/1024.png",
-     "128": "icons/128.png",
-     "16": "icons/16.png",
-     "256": "icons/256.png",
-     "32": "icons/32.png",
-     "48": "icons/48.png",
-     "512": "icons/512.png",
-     "64": "icons/64.png",
-     "72": "icons/72.png",
-     "80": "icons/80.png",
-     "92": "icons/92.png"
-  },
+  "update_url": "https://raw.githubusercontent.com/tofuliang/AIPRM/master/update.xml",
   "manifest_version": 3,
   "name": "AIPRM for ChatGPT",
-  "permissions": [ "activeTab" ],
-  "update_url": "https://raw.githubusercontent.com/tofuliang/AIPRM/master/update.xml",
-  "version": "91.1.4.18",
-  "web_accessible_resources": [ {
-     "matches": [ "https://chat.openai.com/*" ],
-     "resources": [ "config.js", "inject.js", "client.js", "utils.js", "feedback.js", "enums.js", "messages.js", "style.css", "AIPRM-quad-300x300-white-transparent.png", "rxn.js", "list.js", "quota.js", "readability.js" ],
-     "use_dynamic_url": true
-  } ]
+  "description": "AIPRM adds a list of curated prompt templates for SEO, SaaS and more to ChatGPT. Try today.",
+  "version": "91.1.4.19",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "64": "icons/64.png",
+    "72": "icons/72.png",
+    "80": "icons/80.png",
+    "92": "icons/92.png",
+    "128": "icons/128.png",
+    "256": "icons/256.png",
+    "512": "icons/512.png",
+    "1024": "icons/1024.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open ChatGPT"
+  },
+  "permissions": [
+    "activeTab"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://*.aiprm.com:*/*"
+    ]
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "config.js",
+        "inject.js",
+        "client.js",
+        "utils.js",
+        "feedback.js",
+        "enums.js",
+        "messages.js",
+        "style.css",
+        "AIPRM-quad-300x300-white-transparent.png",
+        "rxn.js",
+        "list.js",
+        "quota.js",
+        "readability.js"
+      ],
+      "matches": [
+        "https://chat.openai.com/*"
+      ],
+      "use_dynamic_url": true
+    }
+  ],
+  "content_scripts": [
+    {
+      "js": [
+        "content_script.js"
+      ],
+      "matches": [
+        "https://chat.openai.com/*"
+      ]
+    }
+  ]
 }

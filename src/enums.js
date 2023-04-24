@@ -167,11 +167,11 @@ const ItemStatusNo = {
 /** @enum {number} */
 const PlanLevelNo = {
   FREE_ANONYMOUS: 1,
-  BASIC: 0,
-  PLUS: 0,
-  PRO: 0,
-  ELITE: 0,
-  TITAN: 0,
+  BASIC: 100,
+  PLUS: 200,
+  PRO: 300,
+  ELITE: 400,
+  TITAN: 1000,
 };
 
 export {
