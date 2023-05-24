@@ -546,6 +546,11 @@
   margin-bottom: 1rem;
 }
 
+.AIPRM__my-8 {
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+}
+
 .AIPRM__-mt-0 {
   margin-top: -0px;
 }
@@ -1181,6 +1186,11 @@
   }
 
   /* #endregion Watermark for all responses with AIPRM logo - devices >= SM */
+}
+
+body {
+  /* reset pointer-events to default value to make sure modals are clickable */
+  pointer-events: auto !important;
 }
 
 html[class*="dark"] .dark\:AIPRM__prose-invert {

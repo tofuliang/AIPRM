@@ -217,6 +217,9 @@ window.AIPRM = {
 
     await this.Client.init();
 
+    // fetch config from remote JSON file
+    await this.fetchConfig();
+
     this.replaceFetch();
 
     this.createObserver();
@@ -261,9 +264,6 @@ window.AIPRM = {
     document.addEventListener('AIPRM.tokens', async (event) => {
       this.handleTokensEvent(event);
     });
-
-    // fetch config from remote JSON file
-    await this.fetchConfig();
 
     this.addWatermark();
   },
@@ -1273,9 +1273,9 @@ ${textContent}
 
   // Add "Save prompt as template" button to the user prompt container next to the "Edit" button
   insertSavePromptAsTemplateButton() {
-    // get the first element with selector '.flex.flex-col.items-center .whitespace-pre-wrap' and no children elements
+    // get the first prompt
     const firstPrompt = document.querySelector(
-      '.flex.flex-col.items-center .whitespace-pre-wrap:not(:has(*))'
+      this.Config.getSelectorConfig().FirstPrompt
     );
 
     if (!firstPrompt) {
@@ -2393,6 +2393,20 @@ ${textContent}
             ? paginationContainer
             : ''
         }
+
+        ${
+          currentTemplates.length == 0 &&
+          (this.PromptTopic != DefaultPromptTopic ||
+            this.PromptActivity != DefaultPromptActivity ||
+            this.PromptSearch != '')
+            ? /*html*/ `
+              <div class="AIPRM__w-full AIPRM__my-8">
+                No prompts found for your current filter. Please reset your filters to view all prompts.<br>
+                <a class="AIPRM__underline" href="#" title="Reset filters" onclick="event.stopPropagation(); AIPRM.resetFilters();">Click here to reset filters</a>
+              </div>
+            `
+            : ''
+        }
         
         <ul class="${css`ul`} AIPRM__grid AIPRM__grid-cols-1 lg:AIPRM__grid-cols-2 2xl:AIPRM__grid-cols-4">
           ${currentTemplates
@@ -2707,6 +2721,27 @@ ${textContent}
 
       // Add event listener for the pagination buttons
       document.addEventListener('keydown', this.boundHandleArrowKey);
+    }
+  },
+
+  async resetFilters() {
+    const topicReset = this.PromptTopic != DefaultPromptTopic;
+
+    this.PromptTopic = DefaultPromptTopic;
+    this.PromptActivity = DefaultPromptActivity;
+    this.PromptSearch = '';
+    this.PromptTemplateSection.currentPage = 0;
+
+    if (topicReset) {
+      await this.selectPromptTemplateByIndex(null);
+
+      localStorage.setItem(lastPromptTopicKey, this.PromptTopic);
+
+      this.fetchPromptTemplates();
+
+      this.fetchMessages();
+    } else {
+      await this.insertPromptTemplatesSection();
     }
   },
 
@@ -3236,7 +3271,9 @@ ${textContent}
   // Export the current chat log to a file
   exportCurrentChat() {
     const blocks = [
-      ...document.querySelector('.flex.flex-col.items-center').children,
+      ...document.querySelector(
+        this.Config.getSelectorConfig().ChatLogContainer
+      ).children,
     ];
 
     let markdown = blocks.map((block) => {

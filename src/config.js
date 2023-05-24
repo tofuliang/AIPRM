@@ -115,7 +115,9 @@ export {
 
 /** @typedef {{Enabled: boolean, Config: {Selectors: Object.<string, string>}} WatermarkConfig */
 
-/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig}}} RemoteConfig */
+/** @typedef {{FirstPrompt: string, ChatLogContainer: string}} SelectorConfig */
+
+/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig}, Selectors: SelectorConfig}} RemoteConfig */
 
 export class Config {
   /** @type {RemoteConfig} */
@@ -144,5 +146,10 @@ export class Config {
   /** @returns {WatermarkConfig['Config']} */
   getWatermarkConfig() {
     return this.#config.Features.Watermark.Config;
+  }
+
+  /** @returns {SelectorConfig} */
+  getSelectorConfig() {
+    return this.#config.Selectors;
   }
 }
