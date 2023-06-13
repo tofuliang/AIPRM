@@ -1,4 +1,10 @@
-import { ListTypeNo } from './enums.js';
+import { ListTypeNo, MemberRoleNo } from './enums.js';
+
+import { AIPRMClient } from './client.js';
+
+import { UserQuota } from './quota.js';
+
+import { sanitizeInput } from './utils.js';
 
 // Collection of lists
 export class Lists {
@@ -12,6 +18,56 @@ export class Lists {
    */
   constructor(lists = []) {
     this.lists = lists;
+
+    if (this.lists.length > 1) {
+      this.lists.sort(this.sortLists);
+    }
+  }
+
+  /**
+   * Sort lists by type, ownership (Team Lists) and comment
+   *
+   * @param {List} a
+   * @param {List} b
+   */
+  sortLists(a, b) {
+    try {
+      if (a.ListTypeNo < b.ListTypeNo) {
+        return -1;
+      } else if (a.ListTypeNo > b.ListTypeNo) {
+        return 1;
+      } else {
+        if (a.ListTypeNo === ListTypeNo.TEAM_CUSTOM) {
+          const aOwner = a.IsTeamListOwner();
+          const bOwner = b.IsTeamListOwner();
+
+          if (aOwner && !bOwner) {
+            return -1;
+          } else if (!aOwner && bOwner) {
+            return 1;
+          } else {
+            const aCommentLower = a.Comment.toLowerCase();
+            const bCommentLower = b.Comment.toLowerCase();
+            return aCommentLower < bCommentLower
+              ? -1
+              : aCommentLower > bCommentLower
+              ? 1
+              : 0;
+          }
+        } else {
+          const aCommentLower = a.Comment.toLowerCase();
+          const bCommentLower = b.Comment.toLowerCase();
+          return aCommentLower < bCommentLower
+            ? -1
+            : aCommentLower > bCommentLower
+            ? 1
+            : 0;
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      return 0;
+    }
   }
 
   /**
@@ -21,6 +77,10 @@ export class Lists {
    */
   add(list) {
     this.lists.push(list);
+
+    if (this.lists.length > 1) {
+      this.lists.sort(this.sortLists);
+    }
   }
 
   /**
@@ -45,10 +105,27 @@ export class Lists {
    * @param {import('./client').FirstListItem} firstItem
    * @returns {Promise<List>}
    */
-  async create(client, type, comment = '', firstItem = {}) {
-    const list = await List.create(client, type, comment, firstItem);
+  async create(
+    client,
+    type,
+    comment = '',
+    firstItem = {},
+    forTeamID = undefined
+  ) {
+    const list = await List.create(client, type, comment, firstItem, forTeamID);
 
     this.add(list);
+
+    if (forTeamID === 'NEW') {
+      const newTeam = {
+        TeamID: list.ForTeamID,
+        MemberRoleNo: MemberRoleNo.OWNER,
+        TeamName: 'My First Team',
+        TeamDescription: '',
+      };
+      client.OwnTeamS.push(newTeam);
+      client.UserTeamM.set(newTeam.TeamID, newTeam);
+    }
 
     return list;
   }
@@ -74,9 +151,41 @@ export class Lists {
   /**
    * Get "Custom" lists
    *
+   * @param {UserQuota} userQuota
    * @returns {List[]}
    */
-  getCustom() {
+  getCustom(userQuota) {
+    if (userQuota?.hasTeamsFeatureEnabled()) {
+      return this.lists.filter(
+        (list) => list.is(ListTypeNo.CUSTOM) || list.is(ListTypeNo.TEAM_CUSTOM)
+      );
+    } else {
+      return this.lists.filter((list) => list.is(ListTypeNo.CUSTOM));
+    }
+  }
+
+  /**
+   * Get "Custom" lists with write access for user
+   *
+   * @param {UserQuota} userQuota
+   * @returns {List[]}
+   */
+  getCustomWithWriteAccess(userQuota) {
+    if (userQuota?.hasTeamsFeatureEnabled()) {
+      return this.lists.filter(
+        (list) => list.is(ListTypeNo.CUSTOM) || (list.is(ListTypeNo.TEAM_CUSTOM) && list.IsTeamListOwner())
+      );
+    } else {
+      return this.lists.filter((list) => list.is(ListTypeNo.CUSTOM));
+    }
+  }
+
+  /**
+   * Get "Custom" private lists
+   *
+   * @returns {List[]}
+   */
+  getCustomPrivate() {
     return this.lists.filter((list) => list.is(ListTypeNo.CUSTOM));
   }
 
@@ -115,6 +224,20 @@ export class Lists {
    */
   withIDAndType(listID, type) {
     return this.lists.find((list) => list.list.ID === listID && list.is(type));
+  }
+
+  /**
+   * Removes prompts from all lists by prompt ID and optionally by list type
+   *
+   * @param {number} promptID
+   * @param {ListTypeNo|undefined} listType
+   */
+  removeItemByPromptIDFromListsByType(promptID, listType) {
+    this.lists.forEach((list) => {
+      if (listType === undefined || list.ListTypeNo === listType) {
+        list.removeItemByPromptID(promptID);
+      }
+    });
   }
 }
 
@@ -157,15 +280,93 @@ export class List {
     return this.list.OwnList;
   }
 
+  // get ListTypeNo
+  get ListTypeNo() {
+    return this.list.ListTypeNo;
+  }
+
+  // get ForTeamID
+  get ForTeamID() {
+    return this.list.ForTeamID;
+  }
+
+  IsTeamListOwner() {
+    if (this.list.ListTypeNo === ListTypeNo.CUSTOM) {
+      return false;
+    }
+
+    const team = this.client.UserTeamM?.get(this.list.ForTeamID);
+    if (team) {
+      return team.MemberRoleNo === MemberRoleNo.OWNER;
+    }
+
+    return false;
+  }
+
+  /**
+   * Checks if user has write access to list
+   *
+   * @param {import("./client").UserTeamM} userTeamM
+   * @returns {boolean}
+   */
+  HasWriteAccessForTeamMember(userTeamM) {
+    return (
+      userTeamM?.get(this.list.ForTeamID)?.MemberRoleNo === MemberRoleNo.OWNER
+    );
+  }
+
+  /**
+   * Checks if user has admin access to list
+   *
+   * @param {import("./client").UserTeamM} userTeamM
+   * @returns {boolean}
+   */
+  HasAdminAccessForTeamMember(userTeamM) {
+    return (
+      userTeamM?.get(this.list.ForTeamID)?.MemberRoleNo === MemberRoleNo.OWNER
+    );
+  }
+
+  /**
+   * Removes prompt from list by prompt ID
+   *
+   * @param {number} promptID
+   */
+  removeItemByPromptID(promptID) {
+    this.list.Items = this.list.Items.filter(
+      (item) => item.PromptID !== promptID
+    );
+  }
+
   /**
    * Update list comment via API and update local list
    *
    * @param {List['Comment']} comment
    */
   async update(comment) {
-    this.list.Comment = comment;
+    await this.client.updateList(this.list, comment);
 
-    await this.client.updateList(this.list);
+    this.list.Comment = comment;
+  }
+
+  /**
+   * Update list comment via API and update local list
+   *
+   * @param {ListTypeNo} listTypeNo
+   * @param {string} forTeamID
+   */
+  async updateListType(listTypeNo, forTeamID = undefined) {
+    const resp = await this.client.updateList(
+      this.list,
+      undefined,
+      listTypeNo,
+      forTeamID
+    );
+
+    if (resp) {
+      this.list.ListTypeNo = listTypeNo;
+      this.list.ForTeamID = resp.ForTeamID;
+    }
   }
 
   // Delete list via API
@@ -220,8 +421,17 @@ export class List {
    * @param {import('./client').FirstListItem} firstItem
    * @returns {Promise<List>}
    */
-  static async create(client, type, comment = '', firstItem = {}) {
-    return new List(client, await client.createList(type, comment, firstItem));
+  static async create(
+    client,
+    type,
+    comment = '',
+    firstItem = {},
+    forTeamID = undefined
+  ) {
+    return new List(
+      client,
+      await client.createList(type, comment, firstItem, forTeamID)
+    );
   }
 
   // Get list details via API and update local list, if list items are not already loaded
@@ -252,5 +462,42 @@ export class List {
    */
   is(type) {
     return this.list.ListTypeNo === type;
+  }
+
+  /**
+   * Create title for list
+   *
+   * @param {AIPRMClient} client
+   * @returns {string}
+   */
+  createTitle(client) {
+    if (this.list.ListTypeNo === ListTypeNo.TEAM_CUSTOM) {
+      let title =
+        '&quot;' +
+        sanitizeInput(this.list.Comment) +
+        '&quot; Prompts Team List';
+
+      const team = client.UserTeamM?.get(this.list.ForTeamID);
+
+      if (team) {
+        title =
+          title +
+          ' belonging to &quot;' +
+          sanitizeInput(team.TeamName) +
+          '&quot;';
+
+        if (team.MemberRoleNo === MemberRoleNo.OWNER) {
+          title = title + ' (Owner)';
+        } else {
+          title = title + ' (Read-Only)';
+        }
+      }
+
+      return title;
+    } else {
+      return (
+        '&quot;' + sanitizeInput(this.list.Comment) + '&quot; Prompts List'
+      );
+    }
   }
 }

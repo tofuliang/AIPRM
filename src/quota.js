@@ -1,5 +1,10 @@
 import { AppSignupURL, AppPricingURL, QuotaMessagesURL } from './config.js';
-import { PlanLevelNo, PromptTypeNo } from './enums.js';
+import {
+  PlanLevelNo,
+  PromptTypeNo,
+  ListTypeNo,
+  FeatureBitset,
+} from './enums.js';
 
 const MIN_PUBLIC_PROMPT_VOTES_THRESHOLD = 5;
 
@@ -113,6 +118,14 @@ let QuotaMessages = {
     To create more private prompts, please upgrade your AIPRM account to a plan allowing more private prompts.
     <br>
     <a class="AIPRM__underline" href="${AppPricingURL}">View available plans here.</a>
+  </p>`,
+
+  CONNECT_ACCOUNT_TO_USE_TEAM_PROMPTS: /*html*/ `
+  <h3>Connect OpenAI and AIPRM Accounts</h3>
+
+  <p class="AIPRM__my-4">
+    To use team prompts, you must connect your OpenAI account with your AIPRM account.
+    This will allow you to create team prompts.
   </p>`,
 
   UPGRADE_ACCOUNT_PUBLIC_PROMPTS_QUOTA_EXCEEDED: /*html*/ `
@@ -410,7 +423,7 @@ export class UserQuota {
    */
   canCreateCustomList(lists) {
     // Check if user can create more custom lists (2 lists are reserved for "Favorites" & "Hidden")
-    if (lists.getCustom().length >= this.#quota.TotalPrivateLists - 2) {
+    if (lists.getCustomPrivate().length >= this.#quota.TotalPrivateLists - 2) {
       this.showModal(
         QuotaMessages.UPGRADE_ACCOUNT_CUSTOM_LIST_QUOTA_EXCEEDED,
         AppPricingURL
@@ -429,16 +442,24 @@ export class UserQuota {
    * @returns {boolean}
    */
   canAddToCustomList(list) {
-    if (list.Items.length >= this.#quota.MaxPrivateListItems) {
-      this.showModal(
-        QuotaMessages.UPGRADE_ACCOUNT_LIST_ITEM_QUOTA_EXCEEDED,
-        AppPricingURL
-      );
+    if (list.ListTypeNo === ListTypeNo.TEAM_CUSTOM) {
+      return this.hasTeamsFeatureEnabled();
+    } else {
+      if (list.Items.length >= this.#quota.MaxPrivateListItems) {
+        this.showModal(
+          QuotaMessages.UPGRADE_ACCOUNT_LIST_ITEM_QUOTA_EXCEEDED,
+          AppPricingURL
+        );
 
-      return false;
+        return false;
+      }
     }
 
     return true;
+  }
+
+  canUseTeamListOnlyCheck() {
+    return this.#user.IsLinked && this.hasTeamsFeatureEnabled();
   }
 
   /**
@@ -567,6 +588,25 @@ export class UserQuota {
     return true;
   }
 
+  /**
+   * Check if user can create a team prompt template
+   *
+   * @param {import('./inject.js').Prompt[]} ownPrompts
+   * @returns {boolean}
+   */
+  canCreateTeamPromptTemplate(ownPrompts = []) {
+    // OpenAI account must be connected to AIPRM account
+    if (!this.#user.IsLinked) {
+      return false;
+    }
+
+    if (!this.hasTeamsFeatureEnabled()) {
+      return false;
+    }
+
+    return true;
+  }
+
   // Exceeded max. public prompts quota
   publicPromptsQuotaExceeded() {
     this.showModal(
@@ -590,6 +630,18 @@ export class UserQuota {
       QuotaMessages.UPGRADE_ACCOUNT_PRIVATE_PROMPTS_QUOTA_EXCEEDED,
       AppPricingURL
     );
+  }
+
+  // Exceeded max. team prompts quota
+  teamPromptsQuotaExceeded() {
+    if (!this.#user.IsLinked) {
+      this.showModal(
+        QuotaMessages.CONNECT_ACCOUNT_TO_USE_TEAM_PROMPTS,
+        AppSignupURL
+      );
+
+      return;
+    }
   }
 
   // "Quota exceeded" response from API (either max. private prompts or max. upcoming public prompts)
@@ -799,5 +851,17 @@ export class UserQuota {
       QuotaMessages.UPGRADE_ACCOUNT_PROMPT_VARIABLE_VALUES,
       AppPricingURL
     );
+  }
+
+  /**
+   * @param {FeatureBitset} feature
+   * @returns {boolean}
+   */
+  hasFeatureEnabled(feature) {
+    return (this.#user.FeatureBitset & feature) === feature;
+  }
+
+  hasTeamsFeatureEnabled() {
+    return this.hasFeatureEnabled(FeatureBitset.TEAMS);
   }
 }

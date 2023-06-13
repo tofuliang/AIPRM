@@ -6,11 +6,12 @@ const getEnvironmentConfig = () => {
   switch (currentEnvironment) {
     case 'production':
       return {
-        APIEndpoint: 'https://api.aiprm.com/api3',
+        APIEndpoint: 'https://api.aiprm.com/api4',
         APIEndpointAPP: 'https://app1.aiprm.com/api',
         AppAccountURL: 'https://app1.aiprm.com/account',
         AppPricingURL: 'https://app1.aiprm.com/pricing',
         AppSignupURL: 'https://app1.aiprm.com/signup',
+        AppTeamURL: 'https://app1.aiprm.com/teams',
       };
     case 'test':
       return {
@@ -19,14 +20,16 @@ const getEnvironmentConfig = () => {
         AppAccountURL: 'https://test-app.aiprm.com/account',
         AppPricingURL: 'https://test-app.aiprm.com/pricing',
         AppSignupURL: 'https://test-app.aiprm.com/signup',
+        AppTeamURL: 'https://test-app.aiprm.com/teams',
       };
     case 'local':
       return {
-        APIEndpoint: 'http://localhost:8499',
+        APIEndpoint: 'https://dev-api.aiprm.com/api3',
         APIEndpointAPP: 'https://dev-app.aiprm.com/api',
         AppAccountURL: 'https://dev-app.aiprm.com/account',
         AppPricingURL: 'https://dev-app.aiprm.com/pricing',
         AppSignupURL: 'https://dev-app.aiprm.com/signup',
+        AppTeamURL: 'https://dev-app.aiprm.com/teams',
       };
     default:
       return {
@@ -35,6 +38,7 @@ const getEnvironmentConfig = () => {
         AppAccountURL: 'https://app1.aiprm.com/account',
         AppPricingURL: 'https://app1.aiprm.com/pricing',
         AppSignupURL: 'https://app1.aiprm.com/signup',
+        AppTeamURL: 'https://app1.aiprm.com/teams',
       };
   }
 };
@@ -48,6 +52,7 @@ const APIEndpointAPP = environmentConfig.APIEndpointAPP;
 const AppAccountURL = environmentConfig.AppAccountURL;
 const AppPricingURL = environmentConfig.AppPricingURL;
 const AppSignupURL = environmentConfig.AppSignupURL;
+const AppTeamURL = environmentConfig.AppTeamURL;
 
 // Define global constants
 const PromptPlaceholder = '[PROMPT]';
@@ -109,6 +114,7 @@ export {
   AppSignupURL,
   QuotaMessagesURL,
   ConfigURL,
+  AppTeamURL,
 };
 
 /** @typedef {{Enabled: boolean, Config: {APIEndpointURL: string, MaxCharacters: number, MaxWords: number, CrawledTextPrompt: string, CrawledSourcePrompt: string}}} LiveCrawlingConfig */

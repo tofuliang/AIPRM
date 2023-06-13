@@ -18,7 +18,8 @@ const PromptTypeNo = {
   UNKNOWN: 0,
   PRIVATE: 1,
   PUBLIC: 2,
-  PAID: 3,
+  PAID: 4,
+  TEAM: 16,
 };
 
 /** @enum {number} */
@@ -140,6 +141,7 @@ const ListTypeNo = {
   FAVORITES: 4,
   HIDDEN: 8,
   CUSTOM: 32,
+  TEAM_CUSTOM: 48,
 };
 
 /** @enum {number} */
@@ -174,6 +176,25 @@ const PlanLevelNo = {
   TITAN: 1000,
 };
 
+/** @enum {number} */
+const MemberRoleNo = {
+  UNKNOWN: 0,
+  OWNER: 1,
+  READ_ONLY: 2,
+};
+
+/** @enum {number} */
+const FeatureBitset = {
+  UNKNOWN: 0,
+  TEAMS: 1,
+};
+
+/** @enum {number} */
+const PromptFeatureBitset = {
+  NOTHING: 0,
+  LIVE_CRAWLING: 1,
+};
+
 export {
   PromptTemplatesType,
   NotificationSeverity,
@@ -194,4 +215,7 @@ export {
   ListStatusNo,
   ItemStatusNo,
   PlanLevelNo,
+  MemberRoleNo,
+  FeatureBitset,
+  PromptFeatureBitset,
 };

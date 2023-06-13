@@ -15,6 +15,7 @@ import {
   ListTypeNo,
   ListStatusNo,
   ItemStatusNo,
+  MemberRoleNo,
 } from './enums.js';
 /* eslint-enable */
 
@@ -24,7 +25,7 @@ import { Reaction } from './rxn.js';
 
 /** @typedef {{MessageID: string, MessageGroupNo: MessageGroupNo, MessageSeverityNo: MessageSeverityNo, MessageStatusNo: MessageStatusNo, MessageSubject: string, MessageBodyHTML: string, OnlyExternalID: string, OnlyExternalSystemNo: ExternalSystemNo, ExpiryTime: string, CreationTime: string}} Message */
 
-/** @typedef {{ExternalID: string, ExternalSystemNo: ExternalSystemNo, Email: string, Name: string, UserStatusNo: UserStatusNo, UserLevelNo: UserLevelNo, UserFootprint: string, MaxNewPublicPromptsAllowed: number, MaxNewPrivatePromptsAllowed: number, IsLinked: boolean}} User */
+/** @typedef {{ExternalID: string, ExternalSystemNo: ExternalSystemNo, Email: string, Name: string, UserStatusNo: UserStatusNo, UserLevelNo: UserLevelNo, UserFootprint: string, MaxNewPublicPromptsAllowed: number, MaxNewPrivatePromptsAllowed: number, IsLinked: boolean, FeatureBitset: number}} User */
 
 /** @typedef {{Email: string, Name: string}} AppUser */
 
@@ -38,13 +39,19 @@ import { Reaction } from './rxn.js';
 
 /** @typedef {{PromptID: ListItem['PromptID'], Comment: ListItem['Comment']}} FirstListItem */
 
-/** @typedef {{ID: string, Comment: string, CreationTime: string, Items?: ListItem[], ListOrder: number, ListStatusNo: ListStatusNo, ListTypeNo: ListTypeNo, OwnList: boolean, RevisionTime: string}} List */
+/** @typedef {{ID: string, Comment: string, CreationTime: string, ForTeamID: string, Items?: ListItem[], ListOrder: number, ListStatusNo: ListStatusNo, ListTypeNo: ListTypeNo, OwnList: boolean, RevisionTime: string}} List */
+
+/** @typedef {{TeamID: string, MemberRoleNo: MemberRoleNo, TeamName: string, TeamDescription: string}} UserTeam */
+
+/** @typedef {Map<String, UserTeam>} UserTeamM */
 
 /**
  * @typedef {object} AIPRMClient
  * @property {string} APIEndpoint
  * @property {User} User
  * @property {UserQuota} UserQuota
+ * @property {UserTeamM} UserTeamM
+ * @property {UserTeam[]} OwnTeamS
  * @property {AppUser} AppUser
  * @property {SubPrompt[]} AccountSubPrompts
  * @property {() => Promise<void>} init
@@ -142,6 +149,12 @@ const AIPRMClient = {
 
           this.User.UserStatusNo = res.UserStatusNo;
 
+          if (Object.prototype.hasOwnProperty.call(res, 'FeatureBitset')) {
+            this.User.FeatureBitset = res.FeatureBitset;
+          } else {
+            this.User.FeatureBitset = 0;
+          }
+
           if (Object.prototype.hasOwnProperty.call(res, 'UserLevelNo')) {
             this.User.UserLevelNo = res.UserLevelNo;
           }
@@ -186,6 +199,23 @@ const AIPRMClient = {
             this.UserQuota = new UserQuota(this.User, res.Quota);
           }
 
+
+          if (
+            this.UserQuota?.hasTeamsFeatureEnabled() &&
+            Object.prototype.hasOwnProperty.call(res, 'TeamS') &&
+            typeof res.TeamS === 'object' &&
+            res.TeamS !== null
+          ) {
+            this.OwnTeamS = res.TeamS.filter(
+              (team) => team.MemberRoleNo === MemberRoleNo.OWNER
+            );
+
+            this.UserTeamM = new Map();
+            for (const team of res.TeamS) {
+              this.UserTeamM.set(team.TeamID, team);
+            }
+          }
+
           // has Name and Email
           if (
             Object.prototype.hasOwnProperty.call(res, 'Name') &&
@@ -202,7 +232,16 @@ const AIPRMClient = {
   },
 
   // save the prompt using AIPRM API endpoint
-  savePrompt(prompt) {
+  savePrompt(prompt, AddToListID = undefined) {
+    const body = {
+      ...prompt,
+      User: this.User,
+    };
+
+    if (AddToListID) {
+      body.AddToListID = AddToListID;
+    }
+
     return fetch(
       `${this.APIEndpoint}/Prompts${prompt.ID ? '/' + prompt.ID : ''}`,
       {
@@ -210,10 +249,7 @@ const AIPRMClient = {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...prompt,
-          User: this.User,
-        }),
+        body: JSON.stringify(body),
       }
     ).then(this.handleResponse);
   },
@@ -222,11 +258,17 @@ const AIPRMClient = {
    * Fetch the prompt from AIPRM API endpoint
    *
    * @param {string} PromptID
+   * @param {boolean|undefined} onlyBasic
    * @returns {Promise<Prompt>}
    */
-  getPrompt(PromptID) {
+  getPrompt(PromptID, onlyBasic = undefined) {
+    let paramBasic = '';
+    if (onlyBasic) {
+      paramBasic = '&Basic=true';
+    }
+
     return fetch(
-      `${this.APIEndpoint}/Prompts/${PromptID}?ExternalID=${this.User.ExternalID}&ExternalSystemNo=${this.User.ExternalSystemNo}`
+      `${this.APIEndpoint}/Prompts/${PromptID}?ExternalID=${this.User.ExternalID}&ExternalSystemNo=${this.User.ExternalSystemNo}${paramBasic}`
     ).then(this.handleResponse);
   },
 
@@ -323,7 +365,7 @@ const AIPRMClient = {
     Offset = 0
   ) {
     return fetch(
-      `${this.APIEndpoint}/Prompts?Community=${Community}&Limit=${Limit}&Offset=${Offset}&OwnerExternalID=${this.User.ExternalID}&OwnerExternalSystemNo=${this.User.ExternalSystemNo}&SortModeNo=${SortModeNo}&UserFootprint=${this.User.UserFootprint}`
+      `${this.APIEndpoint}/Prompts?Community=${Community}&Limit=${Limit}&Offset=${Offset}&OwnerExternalID=${this.User.ExternalID}&OwnerExternalSystemNo=${this.User.ExternalSystemNo}&SortModeNo=${SortModeNo}&UserFootprint=${this.User.UserFootprint}&IncludeTeamPrompts=true`
     ).then(this.handleResponse);
   },
 
@@ -560,9 +602,10 @@ const AIPRMClient = {
    * @param {ListTypeNo} TypeNo
    * @param {string} Comment
    * @param {FirstListItem} FirstItem
+   * @param {string} ForTeamID
    * @returns {Promise<List>}
    */
-  createList(TypeNo, Comment = '', FirstItem = {}) {
+  createList(TypeNo, Comment = '', FirstItem = {}, ForTeamID = undefined) {
     const body = {
       User: this.User,
       ListTypeNo: TypeNo,
@@ -573,6 +616,14 @@ const AIPRMClient = {
 
     if (FirstItem.PromptID) {
       body.FirstItem = FirstItem;
+    }
+
+    if (ForTeamID) {
+      if (ForTeamID === 'NEW') {
+        body.CreateNewTeam = true;
+      } else {
+        body.ForTeamID = ForTeamID;
+      }
     }
 
     return fetch(`${APIEndpoint}/Lists`, {
@@ -588,21 +639,52 @@ const AIPRMClient = {
    * Update list using AIPRM API endpoint
    *
    * @param {List} List
+   * @param {ListTypeNo} listTypeNo
+   * @param {string} ForTeamID
    * @returns {Promise<void>}
    */
-  updateList(List) {
+  updateList(
+    List,
+    comment = undefined,
+    listTypeNo = undefined,
+    forTeamID = undefined
+  ) {
+    const body = {
+      User: this.User,
+      ListStatusNo: List.ListStatusNo,
+      ListOrder: List.ListOrder,
+    };
+
+    if (comment === undefined) {
+      body.Comment = List.Comment;
+    } else {
+      body.Comment = comment;
+    }
+
+    if (listTypeNo === undefined) {
+      body.ListTypeNo = List.ListTypeNo;
+    } else {
+      body.ListTypeNo = listTypeNo;
+    }
+
+    if (forTeamID === undefined) {
+      body.ForTeamID = List.ForTeamID;
+    } else if (forTeamID === null) {
+      body.ForTeamID = forTeamID;
+    } else {
+      if (forTeamID === 'NEW') {
+        body.CreateNewTeam = true;
+      } else {
+        body.ForTeamID = forTeamID;
+      }
+    }
+
     return fetch(`${APIEndpoint}/List/${List.ID}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        User: this.User,
-        ListTypeNo: List.ListTypeNo,
-        ListStatusNo: List.ListStatusNo,
-        ListOrder: List.ListOrder,
-        Comment: List.Comment,
-      }),
+      body: JSON.stringify(body),
     }).then(this.handleResponse);
   },
 

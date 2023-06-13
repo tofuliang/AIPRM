@@ -24,11 +24,13 @@ import {
   ToneFeedURL,
   TopicFeedURL,
   WritingStyleFeedURL,
+  AppTeamURL,
 } from './config.js';
 
 /* eslint-disable no-unused-vars */
 import {
   ListTypeNo,
+  MemberRoleNo,
   MessageVoteTypeNo,
   NotificationSeverity,
   PromptTemplatesType,
@@ -37,6 +39,9 @@ import {
   SubPromptTypeNo,
   UsageTypeNo,
   UserLevelNo,
+  ItemStatusNo,
+  PromptFeatureBitset,
+  ExternalSystemNo,
 } from './enums.js';
 /* eslint-enable */
 
@@ -54,6 +59,7 @@ import {
   hideModal,
   sanitizeInput,
   svg,
+  hasFeature,
 } from './utils.js';
 
 /**
@@ -123,6 +129,8 @@ const editPromptTemplateEvent = 'editPromptTemplate';
 const variableWrapperID = 'AIPRM__variable-wrapper';
 const variableIDPrefix = 'AIPRM__VARIABLE';
 
+const headerRegexPattern = /# Prompt by AIPRM, Corp\.[\s\S]*?---\n/;
+
 window.AIPRM = {
   // Save a reference to the original fetch function
   fetch: (window._fetch = window._fetch || window.fetch),
@@ -176,6 +184,9 @@ window.AIPRM = {
   /** @type {Prompt[]} */
   OwnPrompts: [],
 
+  /** @type {Prompt[]} */
+  TeamPrompts: [],
+
   /** @type {Language[]} */
   Languages: [],
 
@@ -209,39 +220,61 @@ window.AIPRM = {
   /** @type {?Prompt} */
   SelectedPromptTemplate: null,
 
+  /** @type {import('./client.js').Message[]} */
+  Messages: [],
+
   async init() {
     console.log('AIPRM init');
 
     // Bind event handler for arrow keys
     this.boundHandleArrowKey = this.handleArrowKey.bind(this);
 
-    await this.Client.init();
+    let clientInitialized = false;
 
-    // fetch config from remote JSON file
-    await this.fetchConfig();
+    // initialize user based on page props
+    if (window?.__NEXT_DATA__?.props?.pageProps?.user?.id) {
+      this.Client.User = {
+        ExternalID: window.__NEXT_DATA__.props.pageProps.user.id,
+        ExternalSystemNo: ExternalSystemNo.OPENAI,
+        UserFootprint: '',
+        IsLinked: false,
+      };
+    } else {
+      // wait to initialize client - we don't have user ID, yet
+      await this.Client.init();
+
+      clientInitialized = true;
+    }
+
+    /**
+     * Wait for prompt templates, lists, topics, activities, config from remote JSON file,
+     * languages, messages and optional client initialization (if not initialized yet)
+     */
+    await Promise.all([
+      this.fetchPromptTemplates(false),
+      this.fetchLists(),
+      this.fetchTopics(),
+      this.fetchActivities(),
+      this.fetchConfig(),
+      this.fetchLanguages(),
+      this.fetchMessages(false),
+      clientInitialized ? Promise.resolve() : this.Client.init(),
+    ]);
 
     this.replaceFetch();
 
     this.createObserver();
 
     if (!this.Client.UserQuota.connectAccountAnnouncement()) {
-      this.fetchMessages();
+      this.showMessages();
     }
-
-    // Wait for lists, topics and activities
-    await Promise.all([
-      this.fetchLists(),
-      this.fetchTopics(),
-      this.fetchActivities(),
-    ]);
 
     this.loadPromptTemplateTypeAndListFromLocalStorage();
 
-    this.fetchPromptTemplates();
+    this.insertPromptTemplatesSection();
 
-    // Wait for languages, tones, writing styles and continue actions
+    // Wait for tones, writing styles and continue actions
     await Promise.all([
-      this.fetchLanguages(),
       this.fetchTones(),
       this.fetchWritingStyles(),
       this.fetchContinueActions(),
@@ -525,6 +558,19 @@ ${textContent}
     );
   },
 
+  /**
+   * Check if the template supports live crawling
+   *
+   * @param {Prompt} template
+   * @returns {boolean}
+   */
+  templateRequiresLiveCrawling(template) {
+    return hasFeature(
+      template.PromptFeatureBitset,
+      PromptFeatureBitset.LIVE_CRAWLING
+    );
+  },
+
   // handle AIPRM.tokens event from AIPRM APP
   async handleTokensEvent(event) {
     // store tokens in local storage
@@ -611,15 +657,21 @@ ${textContent}
 
     let prompt;
 
-    try {
-      // Fetch the prompt using the AIPRM API client
-      prompt = await this.Client.getPrompt(promptID);
-    } catch (error) {
-      this.showNotification(
-        NotificationSeverity.ERROR,
-        'Something went wrong. Please try again.'
-      );
-      return;
+    // for correct deep linking of team prompts, use existing team prompt
+    const teamPrompt = this.TeamPrompts.find((p) => p.ID === promptID);
+    if (teamPrompt) {
+      prompt = teamPrompt;
+    } else {
+      try {
+        // Fetch the prompt using the AIPRM API client
+        prompt = await this.Client.getPrompt(promptID);
+      } catch (error) {
+        this.showNotification(
+          NotificationSeverity.ERROR,
+          'Something went wrong. Please try again.'
+        );
+        return;
+      }
     }
 
     if (!prompt) {
@@ -627,7 +679,7 @@ ${textContent}
     }
 
     // Select the prompt template
-    this.selectPromptTemplate(prompt);
+    await this.selectPromptTemplate(prompt);
 
     // Pre-fill the prompt variables from the URL
     if (prompt.PromptVariables) {
@@ -647,11 +699,30 @@ ${textContent}
   },
 
   // Fetch the list of messages from the server
-  async fetchMessages() {
-    showMessage(
-      await this.Client.getMessages(
+  async fetchMessages(render = true) {
+    try {
+      this.Messages = await this.Client.getMessages(
         this.PromptTopic === DefaultPromptTopic ? '' : this.PromptTopic
-      ),
+      );
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        `Could not load messages. ${
+          error instanceof Reaction ? error.message : ''
+        }`
+      );
+      return;
+    }
+
+    if (render) {
+      this.showMessages();
+    }
+  },
+
+  // Display one of the messages
+  showMessages() {
+    showMessage(
+      this.Messages,
       this.confirmMessage.bind(this),
       this.voteForMessage.bind(this)
     );
@@ -996,7 +1067,10 @@ ${textContent}
               this.Client.UserQuota.canUseAIPRMVerifiedList(false)) ||
             // Custom List
             (this.Lists.withIDAndType(lastListID, ListTypeNo.CUSTOM) &&
-              this.Client.UserQuota.canUseCustomListOnlyCheck()))
+              this.Client.UserQuota.canUseCustomListOnlyCheck()) ||
+            // Team List
+            (this.Lists.withIDAndType(lastListID, ListTypeNo.TEAM_CUSTOM) &&
+              this.Client.UserQuota.canUseTeamListOnlyCheck()))
         ) {
           matched = true;
           this.PromptTemplatesType = PromptTemplatesType.CUSTOM_LIST;
@@ -1014,32 +1088,60 @@ ${textContent}
     }
   },
 
-  async fetchPromptTemplates() {
-    /** @type {Prompt[]} */
-    const templates = await this.Client.getPrompts(
-      this.PromptTopic === DefaultPromptTopic ? '' : this.PromptTopic,
-      this.PromptSortMode
-    );
+  async fetchPromptTemplates(render = true) {
+    let templates;
 
-    // split templates into public and own
-    [this.PromptTemplates, this.OwnPrompts] = templates.reduce(
-      (publicPrivatePrompts, template) => {
-        // Public template
-        if (template.PromptTypeNo === PromptTypeNo.PUBLIC) {
-          publicPrivatePrompts[0].push(template);
-        }
+    try {
+      /** @type {Prompt[]} */
+      templates = await this.Client.getPrompts(
+        this.PromptTopic === DefaultPromptTopic ? '' : this.PromptTopic,
+        this.PromptSortMode
+      );
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        `Could not load prompt templates. ${
+          error instanceof Reaction ? error.message : ''
+        }`
+      );
+      return;
+    }
 
-        // Private or public template owned by current user
-        if (template.OwnPrompt) {
-          publicPrivatePrompts[1].push(template);
-        }
+    // split templates into public, own and team
+    [this.PromptTemplates, this.OwnPrompts, this.TeamPrompts] =
+      templates.reduce(
+        (publicPrivateTeamPrompts, template) => {
+          // Public template
+          if (
+            template.PromptTypeNo === PromptTypeNo.PUBLIC &&
+            (this.PromptTopic === DefaultPromptTopic ||
+              template.Community === this.PromptTopic)
+          ) {
+            publicPrivateTeamPrompts[0].push(template);
+          }
 
-        return publicPrivatePrompts;
-      },
-      [[], []]
-    );
+          // Private, Team or Public template owned by current user
+          if (
+            template.OwnPrompt &&
+            (this.PromptTopic === DefaultPromptTopic ||
+              template.Community === this.PromptTopic)
+          ) {
+            publicPrivateTeamPrompts[1].push(template);
+          }
 
-    await this.insertPromptTemplatesSection();
+          // Team templates - we need to have all TeamPrompts in this array
+          if (template.PromptTypeNo === PromptTypeNo.TEAM) {
+            publicPrivateTeamPrompts[2].push(template);
+          }
+
+          return publicPrivateTeamPrompts;
+        },
+        [[], [], []]
+      );
+
+    if (render) {
+      await this.insertPromptTemplatesSection();
+    }
   },
 
   createObserver() {
@@ -1383,6 +1485,17 @@ ${textContent}
       return;
     }
 
+    // current user cannot create team prompt template, but can edit existing team prompt template
+    if (
+      prompt.PromptTypeNo === PromptTypeNo.TEAM &&
+      !this.canCreateTeamPromptTemplate() &&
+      (!existingPrompt || promptTypeChanged)
+    ) {
+      this.Client.UserQuota.teamPromptsQuotaExceeded();
+
+      return;
+    }
+
     // reset prompt variables to extract them based on updated prompt
     prompt.PromptVariables = undefined;
 
@@ -1414,6 +1527,16 @@ ${textContent}
     ) {
       errors.push(
         'Please identify with Author Name and URL to publish a prompt template as public.'
+      );
+    }
+
+    // require AuthorName if prompt is Team
+    if (
+      prompt.PromptTypeNo === PromptTypeNo.TEAM &&
+      !prompt.AuthorName.trim()
+    ) {
+      errors.push(
+        'Please identify with Author Name to publish a prompt template as Team prompt.'
       );
     }
 
@@ -1470,9 +1593,11 @@ ${textContent}
       prompt[key] = value;
     }
 
-    prompt.PromptTypeNo = prompt.Public
-      ? PromptTypeNo.PUBLIC
-      : PromptTypeNo.PRIVATE;
+    prompt.PromptTypeNo = parseInt(prompt.PromptTypeNo);
+
+    if (this.promptRequiresLiveCrawling(prompt.Prompt)) {
+      prompt.PromptFeatureBitset |= PromptFeatureBitset.LIVE_CRAWLING;
+    }
 
     // re-check user status
     await this.Client.checkUserStatus();
@@ -1482,7 +1607,9 @@ ${textContent}
     }
 
     try {
-      const savedPrompt = await this.Client.savePrompt(prompt);
+      const addToListID = await this.getAddToListIDForTeamPrompt(prompt);
+
+      const savedPrompt = await this.Client.savePrompt(prompt, addToListID);
 
       // Update revision time to current time
       prompt.RevisionTime = new Date().toISOString();
@@ -1528,10 +1655,7 @@ ${textContent}
 
     this.hideSavePromptModal();
 
-    this.showNotification(
-      NotificationSeverity.SUCCESS,
-      'Prompt template was saved successfully to "Own Prompts".'
-    );
+    await this.processSavePromptResult(prompt);
 
     await this.insertPromptTemplatesSection();
 
@@ -1540,8 +1664,245 @@ ${textContent}
       this.SelectedPromptTemplate != null &&
       prompt.ID == this.SelectedPromptTemplate.ID
     ) {
-      this.selectPromptTemplate(prompt);
+      await this.selectPromptTemplate(prompt);
     }
+  },
+
+  async getAddToListIDForTeamPrompt(prompt) {
+    if (
+      prompt.PromptTypeNo === PromptTypeNo.TEAM &&
+      this.Client.UserQuota?.hasTeamsFeatureEnabled()
+    ) {
+      const ownTeamLists = this.Lists.lists.filter(
+        (list) =>
+          list.ListTypeNo == ListTypeNo.TEAM_CUSTOM &&
+          this.Client.UserTeamM?.get(list.ForTeamID)?.MemberRoleNo ==
+            MemberRoleNo.OWNER
+      );
+
+      if (ownTeamLists.length == 1) {
+        const isInOwnTeamList = await this.isPromptInAtLeastOneList(
+          prompt,
+          ownTeamLists
+        );
+
+        if (!isInOwnTeamList) {
+          return ownTeamLists[0].ID;
+        }
+      }
+    }
+  },
+
+  async processSavePromptResult(prompt) {
+    try {
+      // Add to team list if team prompt
+      if (
+        prompt.PromptTypeNo === PromptTypeNo.TEAM &&
+        this.Client.UserQuota?.hasTeamsFeatureEnabled()
+      ) {
+        let list;
+
+        if (this.Client.OwnTeamS?.length == 0) {
+          // create team and team list
+          list = await this.Lists.create(
+            this.Client,
+            ListTypeNo.TEAM_CUSTOM,
+            'My Team List',
+            {
+              PromptID: prompt.ID,
+              Comment: '',
+            },
+            'NEW'
+          );
+
+          this.showNotification(
+            NotificationSeverity.SUCCESS,
+            'Prompt template now visible in Team List "' +
+              sanitizeInput(list.Comment) +
+              '" for Team "My First Team".'
+          );
+        } else {
+          const ownTeamLists = this.Lists.lists.filter(
+            (list) =>
+              list.ListTypeNo == ListTypeNo.TEAM_CUSTOM &&
+              this.Client.UserTeamM?.get(list.ForTeamID)?.MemberRoleNo ==
+                MemberRoleNo.OWNER
+          );
+
+          const isInOwnTeamList = await this.isPromptInAtLeastOneList(
+            prompt,
+            ownTeamLists
+          );
+
+          if (ownTeamLists.length == 0) {
+            //create team list
+            list = await this.Lists.create(
+              this.Client,
+              ListTypeNo.TEAM_CUSTOM,
+              'My Team List',
+              {
+                PromptID: prompt.ID,
+                Comment: '',
+              },
+              this.Client.OwnTeamS[0].TeamID
+            );
+
+            this.showNotification(
+              NotificationSeverity.SUCCESS,
+              'Prompt template now visible in Team List "' +
+                sanitizeInput(list.Comment) +
+                '" for Team "' +
+                sanitizeInput(
+                  this.Client.UserTeamM?.get(list.ForTeamID)?.TeamName
+                ) +
+                '".'
+            );
+          } else if (ownTeamLists.length == 1) {
+            if (isInOwnTeamList) {
+              this.showNotification(
+                NotificationSeverity.SUCCESS,
+                'Prompt template was saved successfully.'
+              );
+            } else {
+              list = ownTeamLists[0];
+
+              const creationTime = new Date();
+
+              list.list.Items.push({
+                Comment: '',
+                CreationTime: creationTime.toISOString(),
+                ItemOrder: 0,
+                ItemStatusNo: ItemStatusNo.ACTIVE,
+                ListID: list.ID,
+                PromptID: prompt.ID,
+                RevisionTime: creationTime.toISOString(),
+              });
+
+              // add to TeamList is handled in savePrompt for this case
+              this.showNotification(
+                NotificationSeverity.SUCCESS,
+                'Prompt template now visible in Team List "' +
+                  sanitizeInput(list.Comment) +
+                  '" for Team "' +
+                  sanitizeInput(
+                    this.Client.UserTeamM?.get(list.ForTeamID)?.TeamName
+                  ) +
+                  '".'
+              );
+            }
+          } else {
+            this.showNotification(
+              NotificationSeverity.SUCCESS,
+              'Prompt template was saved successfully.'
+            );
+
+            if (!isInOwnTeamList) {
+              // show modal to pick team list
+              this.showListSelectionModal(ownTeamLists, prompt, true);
+            }
+          }
+        }
+      } else if (
+        prompt.PromptTypeNo === PromptTypeNo.PRIVATE &&
+        this.PromptTemplatesList &&
+        this.Lists.withIDAndType(this.PromptTemplatesList, ListTypeNo.CUSTOM)
+      ) {
+        const ownPrivateLists = this.Lists.lists.filter(
+          (list) => list.ListTypeNo == ListTypeNo.CUSTOM
+        );
+
+        const isInOwnPrivateList = await this.isPromptInAtLeastOneList(
+          prompt,
+          ownPrivateLists
+        );
+
+        if (ownPrivateLists.length == 0) {
+          this.showNotification(
+            NotificationSeverity.SUCCESS,
+            'Prompt template was saved successfully.'
+          );
+        } else if (ownPrivateLists.length == 1) {
+          if (isInOwnPrivateList) {
+            this.showNotification(
+              NotificationSeverity.SUCCESS,
+              'Prompt template was saved successfully.'
+            );
+          } else {
+            const list = ownPrivateLists[0];
+
+            if (!this.Client.UserQuota.canAddToCustomList(list)) {
+              return;
+            }
+
+            await list.add({ ID: prompt.ID });
+
+            this.showNotification(
+              NotificationSeverity.SUCCESS,
+              'Prompt template now visible in List "' +
+                sanitizeInput(list.Comment) +
+                '".'
+            );
+          }
+        } else {
+          this.showNotification(
+            NotificationSeverity.SUCCESS,
+            'Prompt template was saved successfully.'
+          );
+
+          if (!isInOwnPrivateList) {
+            // show modal to pick list
+            this.showListSelectionModal(
+              this.Lists.getCustomWithWriteAccess(this.Client.UserQuota),
+              prompt,
+              false
+            );
+          }
+        }
+      } else {
+        this.showNotification(
+          NotificationSeverity.SUCCESS,
+          'Prompt template was saved successfully.'
+        );
+      }
+    } catch (error) {
+      // user has reached the limit of list items
+      if (
+        error instanceof Reaction &&
+        error.ReactionNo === ReactionNo.RXN_AIPRM_QUOTA_EXCEEDED
+      ) {
+        this.Client.UserQuota.listItemQuotaExceeded();
+        return;
+      }
+
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        error instanceof Reaction
+          ? error.message
+          : 'Something went wrong. Please try again.'
+      );
+      return;
+    }
+  },
+
+  /**
+   * Checks if prompt is in at least one of the lists
+   *
+   * @param {Prompt} prompt
+   * @param {List[]} lists
+   * @returns {Promise<boolean>}
+   */
+  async isPromptInAtLeastOneList(prompt, lists) {
+    if (lists.length == 0) {
+      return false;
+    }
+
+    for (const list of lists) {
+      if (await list.has(prompt)) {
+        return true;
+      }
+    }
+
+    return false;
   },
 
   /**
@@ -1566,9 +1927,22 @@ ${textContent}
       return;
     }
 
+    // remove template using ID from Team lists
+    if (prompt.PromptTypeNo === PromptTypeNo.PRIVATE) {
+      this.Lists.removeItemByPromptIDFromListsByType(
+        prompt.ID,
+        ListTypeNo.TEAM_CUSTOM
+      );
+    }
+
     // find prompt in OwnPrompts by ID and update it
     this.OwnPrompts = this.OwnPrompts.map((ownPrompt) =>
       ownPrompt.ID === prompt.ID ? prompt : ownPrompt
+    );
+
+    // find prompt in TeamPrompts by ID and update it
+    this.TeamPrompts = this.TeamPrompts.map((teamPrompt) =>
+      teamPrompt.ID === prompt.ID ? prompt : teamPrompt
     );
 
     // find the prompt in PromptTemplates by ID
@@ -1801,12 +2175,26 @@ ${textContent}
                     </div>
                   </div>
 
-                  <div class="AIPRM__block AIPRM__mt-4">
-                    <label class="AIPRM__text-sm" id="savePromptForm-public-checkbox">
-                      <input name="Public" value="true" type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700"> 
-                      Share prompt template publicly
-                    </label>
-                    
+                  <div class="AIPRM__flex">
+                    <div class="AIPRM__w-full">
+                      <label>Who can see this?</label>
+                      <select name="PromptTypeNo" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
+                        <option value="${
+                          PromptTypeNo.PRIVATE
+                        }">Only me (Private)</option>
+                        ${
+                          this.Client.UserQuota?.hasTeamsFeatureEnabled()
+                            ? /* html */ `<option value="${PromptTypeNo.TEAM}">My Team</option>`
+                            : ''
+                        }
+                        <option id="PromptTypeNo-public" value="${
+                          PromptTypeNo.PUBLIC
+                        }">Everyone (Public)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="AIPRM__block">
                     <div class="AIPRM__flex AIPRM__justify-between AIPRM__mt-4">
                       <div class="AIPRM__mr-4 AIPRM__w-full"><label>Author Name</label>
                         <input name="AuthorName" type="text" title="Author Name visible for all users"
@@ -1847,6 +2235,24 @@ ${textContent}
         
       </div>
     `;
+
+    const form = document.getElementById('savePromptForm');
+
+    // set PromptTypeNo based on from where the modal was opened
+    if (!isEditPromptEvent) {
+      if (this.PromptTemplatesType === PromptTemplatesType.PUBLIC) {
+        form.elements['PromptTypeNo'].value = PromptTypeNo.PUBLIC;
+      } else if (this.PromptTemplatesType === PromptTemplatesType.OWN) {
+        form.elements['PromptTypeNo'].value = PromptTypeNo.PRIVATE;
+      } else {
+        const selectedList = this.Lists.withID(this.PromptTemplatesList);
+        if (selectedList.ListTypeNo === ListTypeNo.CUSTOM) {
+          form.elements['PromptTypeNo'].value = PromptTypeNo.PRIVATE;
+        } else {
+          form.elements['PromptTypeNo'].value = PromptTypeNo.TEAM;
+        }
+      }
+    }
 
     // add onchange event listener to select[name="Community"] to update the activities
     savePromptModal.querySelector('select[name="Community"]').onchange = (
@@ -1974,9 +2380,16 @@ ${textContent}
       return [];
     }
 
-    // if list has items, return prompts which are in list
-    const templates = [...this.PromptTemplates, ...this.OwnPrompts].filter(
-      (prompt) => listPromptIDS.includes(prompt.ID)
+    // if list has items, return prompts which are in list and are from selected topic
+    const templates = [
+      ...this.PromptTemplates,
+      ...this.OwnPrompts,
+      ...this.TeamPrompts,
+    ].filter(
+      (prompt) =>
+        listPromptIDS.includes(prompt.ID) &&
+        (this.PromptTopic === DefaultPromptTopic ||
+          prompt.Community === this.PromptTopic)
     );
 
     // make sure templates are unique based on ID
@@ -2108,7 +2521,7 @@ ${textContent}
 
     const hiddenList = this.Lists.getHidden();
 
-    const customLists = this.Lists.getCustom();
+    const customLists = this.Lists.getCustom(this.Client.UserQuota);
     const customListIDS = customLists.map((list) => list.ID);
 
     const AIPRMVerifiedList = this.Lists.getAIPRMVerified();
@@ -2118,6 +2531,8 @@ ${textContent}
       (customListIDS.includes(this.PromptTemplatesList) ||
         (AIPRMVerifiedList?.ID === this.PromptTemplatesList &&
           AIPRMVerifiedList.OwnList));
+
+    const selectedList = this.Lists.withID(this.PromptTemplatesList);
 
     // Pagination buttons (conditionally rendered, depending on the number of prompt templates)
     const paginationContainer = /*html*/ `
@@ -2252,7 +2667,8 @@ ${textContent}
             </a>
           </li>
           <li class="AIPRM__flex-1 AIPRM__mr-2">
-            <a href="#" id="ownPromptsTab" onclick="AIPRM.changePromptTemplatesType('${
+            <a href="#" id="ownPromptsTab" title="Prompts you own (Private + Team + Public)" 
+            onclick="AIPRM.changePromptTemplatesType('${
               PromptTemplatesType.OWN
             }')" 
             class="${
@@ -2270,9 +2686,9 @@ ${textContent}
                   .map(
                     (list) => /*html*/ `
                     <li class="AIPRM__flex-1 AIPRM__mr-2">
-                      <a href="#" title="&quot;${sanitizeInput(
-                        list.Comment
-                      )}&quot; Prompts List" onclick="AIPRM.changePromptTemplatesType('${
+                      <a href="#" title="${list.createTitle(
+                        this.Client
+                      )}" onclick="AIPRM.changePromptTemplatesType('${
                       PromptTemplatesType.CUSTOM_LIST
                     }', '${list.ID}')"
                       class="${
@@ -2282,22 +2698,16 @@ ${textContent}
                           ? 'AIPRM__bg-gray-50 dark:AIPRM__bg-white/5'
                           : ''
                       } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__gap-2 AIPRM__w-full"> 
-                        ${sanitizeInput(list.Comment)}
+                      ${
+                        list.ListTypeNo === ListTypeNo.TEAM_CUSTOM
+                          ? this.Client.UserTeamM?.get(list.ForTeamID)
+                              ?.MemberRoleNo === MemberRoleNo.OWNER
+                            ? svg('TeamListSolid')
+                            : svg('TeamList')
+                          : ''
+                      }  ${sanitizeInput(list.Comment)}
 
-                        ${
-                          this.PromptTemplatesType ===
-                            PromptTemplatesType.CUSTOM_LIST &&
-                          this.PromptTemplatesList === list.ID
-                            ? /*html*/ `
-                            <span onclick="event.stopPropagation(); AIPRM.editCustomList('${
-                              list.ID
-                            }')" class="AIPRM__ml-2">${svg('Edit')}</span>
-                            <span onclick="event.stopPropagation(); AIPRM.deleteCustomList('${
-                              list.ID
-                            }')">${svg('Trash')}</span>
-                          `
-                            : ''
-                        }
+                        ${this.createCustomListActions(list)}
                       </a>
                     </li>`
                   )
@@ -2381,7 +2791,7 @@ ${textContent}
           </div>
           
           <div>
-            <input id="promptSearchInput" type="text" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 md:AIPRM__w-[260px]" placeholder="Search" 
+            <input id="promptSearchInput" type="search" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 md:AIPRM__w-[260px]" placeholder="Search" 
             value="${sanitizeInput(
               this.PromptSearch
             )}" onfocus="this.value = this.value">
@@ -2407,7 +2817,7 @@ ${textContent}
             `
             : ''
         }
-        
+
         <ul class="${css`ul`} AIPRM__grid AIPRM__grid-cols-1 lg:AIPRM__grid-cols-2 2xl:AIPRM__grid-cols-4">
           ${currentTemplates
             .map(
@@ -2434,7 +2844,11 @@ ${textContent}
               }
 
               ${
-                isCustomListView
+                isCustomListView &&
+                (selectedList.OwnList ||
+                  selectedList.HasWriteAccessForTeamMember(
+                    this.Client.UserTeamM
+                  ))
                   ? /*html*/ `
                     <div class="AIPRM__absolute AIPRM__top-0 AIPRM__left-0 AIPRM__flex AIPRM__text-gray-400 lg:AIPRM__invisible group-hover:AIPRM__visible">
                       <a title="Remove this prompt from the list"
@@ -2539,14 +2953,19 @@ ${textContent}
                     ? /*html*/ `<span class="AIPRM__mr-1" title="Public">${svg(
                         'Globe'
                       )}</span>`
+                    : template.PromptTypeNo === PromptTypeNo.TEAM
+                    ? /*html*/ `<span class="AIPRM__mr-1" title="Team">${svg(
+                        'TeamPrompt'
+                      )}</span>`
                     : /*html*/ `<span class="AIPRM__mr-1" title="Private">${svg(
                         'Lock'
                       )}</span>`
                 }
 
                 ${
-                  template.AuthorURL && template.AuthorName
-                    ? /*html*/ `· 
+                  template.AuthorName
+                    ? template.AuthorURL
+                      ? /*html*/ `· 
                       <a href="${sanitizeInput(
                         template.AuthorURL
                       )}" class="AIPRM__mx-1 AIPRM__underline AIPRM__overflow-hidden AIPRM__text-ellipsis AIPRM__flex-1 AIPRM__whitespace-nowrap"
@@ -2555,8 +2974,12 @@ ${textContent}
                       title="Created by ${sanitizeInput(template.AuthorName)}">
                         ${sanitizeInput(template.AuthorName)}
                       </a>`
+                      : /* html */ `· <span class="AIPRM__mx-1 AIPRM__overflow-hidden AIPRM__text-ellipsis AIPRM__flex-1 AIPRM__whitespace-nowrap"
+                      title="Created by ${sanitizeInput(template.AuthorName)}">
+                      ${sanitizeInput(template.AuthorName)}
+                    </span>`
                     : ''
-                }            
+                }  
                 · 
                 <span title="Last updated on ${formatDateTime(
                   template.RevisionTime
@@ -2581,7 +3004,7 @@ ${textContent}
               <p class="${css`p`} AIPRM__text-gray-600 dark:AIPRM__text-gray-200 AIPRM__overflow-hidden AIPRM__text-ellipsis" style="display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;"
                 title="${sanitizeInput(template.Teaser)}">
                 ${
-                  this.promptRequiresLiveCrawling(template.Prompt)
+                  this.templateRequiresLiveCrawling(template)
                     ? /*html*/ `
                       <span class="AIPRM__bg-green-100 AIPRM__text-green-800 AIPRM__text-xs AIPRM__font-medium AIPRM__mr-1 AIPRM__px-1.5 AIPRM__py-0.5 AIPRM__rounded dark:AIPRM__bg-green-900 dark:AIPRM__text-green-300" title="This prompt is utilizing AIPRM Live Crawling feature.">Live Crawling</span>
                     `
@@ -2651,11 +3074,23 @@ ${textContent}
             .join('')}
               
           ${
-            this.PromptTemplatesType === PromptTemplatesType.OWN
+            this.PromptTemplatesType !== PromptTemplatesType.CUSTOM_LIST ||
+            selectedList.ListTypeNo === ListTypeNo.CUSTOM ||
+            (selectedList.ListTypeNo === ListTypeNo.TEAM_CUSTOM &&
+              this.Client.UserTeamM?.get(selectedList.ForTeamID)
+                ?.MemberRoleNo === MemberRoleNo.OWNER)
               ? /*html*/ `<button onclick="AIPRM.showSavePromptModal()" class="${css`card`} AIPRM__relative AIPRM__group AIPRM__justify-center AIPRM__items-center">
               <div class="AIPRM__flex AIPRM__items-center AIPRM__gap-3">
                 ${svg('Plus')}
-                Add new prompt template   
+                ${
+                  this.PromptTemplatesType === PromptTemplatesType.PUBLIC
+                    ? 'Add Public Prompt'
+                    : this.PromptTemplatesType === PromptTemplatesType.OWN
+                    ? 'Add Private Prompt'
+                    : selectedList.ListTypeNo === ListTypeNo.CUSTOM
+                    ? 'Add Private Prompt'
+                    : 'Add Team Prompt'
+                }
               </div>
             </button>`
               : ''
@@ -2722,6 +3157,233 @@ ${textContent}
       // Add event listener for the pagination buttons
       document.addEventListener('keydown', this.boundHandleArrowKey);
     }
+  },
+
+  /** @param {List} list */
+  createCustomListActions(list) {
+    if (
+      this.PromptTemplatesType !== PromptTemplatesType.CUSTOM_LIST ||
+      this.PromptTemplatesList !== list.ID
+    ) {
+      return '';
+    }
+
+    if (
+      list.ListTypeNo === ListTypeNo.TEAM_CUSTOM &&
+      !list.HasAdminAccessForTeamMember(this.Client.UserTeamM)
+    ) {
+      return '';
+    }
+
+    return /*html*/ `
+        <div class="AIPRM__dropdown">
+          <button class="AIPRM__align-middle AIPRM__pl-2">
+            ${svg('EllipsisVertical')}
+          </button>
+
+          <ul title="" class="AIPRM__dropdown-menu AIPRM__hidden AIPRM__z-50 AIPRM__border AIPRM__bg-white AIPRM__absolute AIPRM__text-left AIPRM__cursor-pointer AIPRM__rounded-xl AIPRM__border-gray-100 dark:AIPRM__bg-gray-900 dark:AIPRM__border-gray-800 dark:AIPRM__shadow-xs dark:AIPRM__text-gray-100 AIPRM__shadow-xxs AIPRM__py-2">
+            <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation(); AIPRM.editCustomList('${
+              list.ID
+            }')">${svg('Edit')}&nbsp;Rename List</li>
+
+            ${
+              this.Client.UserQuota?.hasTeamsFeatureEnabled()
+                ? /*html*/ `
+                <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation();AIPRM.toggleTeamList('${
+                  list.ID
+                }');">
+                  ${
+                    list.ListTypeNo === ListTypeNo.TEAM_CUSTOM
+                      ? /* html */ `${svg('Lock')}&nbsp;Make List Private`
+                      : /* html */ `${svg('Share')}&nbsp;Share with Team`
+                  }
+                </li>
+                `
+                : ''
+            }
+
+            <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-red-100 dark:hover:!AIPRM__bg-red-500/50 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation(); AIPRM.deleteCustomList('${
+              list.ID
+            }')">${svg('Trash')}&nbsp;Delete List</li>
+
+            ${
+              list.ListTypeNo === ListTypeNo.TEAM_CUSTOM
+                ? /* html */ `
+                <div class="AIPRM__my-1.5 AIPRM__h-px AIPRM__bg-gray-100 dark:AIPRM__bg-white/20" role="none"></div>
+                <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation();window.open('${AppTeamURL}/${
+                    list.ForTeamID
+                  }')">${svg('TeamPrompt')}&nbsp;Manage Team</li>`
+                : ''
+            }
+          </ul>
+        </div>
+    `;
+  },
+
+  /** @param {List['ID']} listID */
+  toggleTeamList(listID) {
+    const list = this.Lists.withID(listID);
+
+    if (list.ListTypeNo === ListTypeNo.TEAM_CUSTOM) {
+      this.switchListToPrivateList(list);
+    } else {
+      this.switchListToTeamList(listID);
+    }
+  },
+
+  /** @param {List} list */
+  async switchListToPrivateList(list) {
+    // Ask for confirmation
+    if (
+      !confirm(
+        `Are you sure you want to make list "${sanitizeInput(
+          list.Comment
+        )}" private and stop sharing it with your Team?`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      // Update the list using the API and update it in the local list of lists
+      await list.updateListType(ListTypeNo.CUSTOM, null);
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        `Could not update list. ${
+          error instanceof Reaction ? error.message : ''
+        }`
+      );
+      return;
+    }
+
+    this.showNotification(
+      NotificationSeverity.SUCCESS,
+      `Updated prompts list "${sanitizeInput(list.Comment)}".`
+    );
+
+    this.insertPromptTemplatesSection();
+  },
+
+  /** @param {List['ID']} listID */
+  async switchListToTeamList(listID) {
+    let shareListWithTeamModal = document.getElementById(
+      'shareListWithTeamModal'
+    );
+
+    // if modal does not exist, create it, add event listener on submit and append it to body
+    if (!shareListWithTeamModal) {
+      shareListWithTeamModal = document.createElement('div');
+      shareListWithTeamModal.id = 'shareListWithTeamModal';
+
+      shareListWithTeamModal.addEventListener(
+        'submit',
+        this.shareListWithTeam.bind(this, listID)
+      );
+
+      document.body.appendChild(shareListWithTeamModal);
+    }
+
+    shareListWithTeamModal.innerHTML = /*html*/ `
+      <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
+      <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+      </div>
+
+      <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
+        <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
+          <form>
+            <div
+              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+              role="dialog" aria-modal="true" aria-labelledby="modal-headline">
+
+              <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__w-96">
+                <label>Share with Team</label>
+                <select id="shareListWithTeamSelectTeam" name="shareListWithTeamSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                  ${
+                    this.Client.OwnTeamS?.length > 0
+                      ? this.Client.OwnTeamS.map(
+                          (team) =>
+                            /*html*/ `<option value="${sanitizeInput(
+                              team.TeamID
+                            )}">${sanitizeInput(team.TeamName)}</option>`
+                        ).join('')
+                      : /*html*/ `<option value="NEW">My First Team</option>`
+                  }
+                </select>
+
+                ${
+                  this.Client.OwnTeamS?.length > 0
+                    ? /*html*/ `<a href="${AppTeamURL}" target="blank" class="AIPRM__text-sm AIPRM__text-gray-500 AIPRM__underline">Manage My Teams</a>`
+                    : ''
+                }
+              </div>
+
+              <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+                <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
+                        onclick="AIPRM.hideShareListWithTeamModal()"> Cancel
+                </button>
+                <button type="submit" class="AIPRM__bg-green-600 hover:AIPRM__bg-green-700 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white">Share with Team</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+    </div>
+    `;
+
+    shareListWithTeamModal.style = 'display: block;';
+
+    // add event listener to close the modal on ESC
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        this.hideShareListWithTeamModal();
+      }
+    });
+  },
+
+  hideShareListWithTeamModal() {
+    this.hideModal('shareListWithTeamModal');
+  },
+
+  /**
+   * @param {List['ID']} listID
+   * @param {Event} e
+   */
+  async shareListWithTeam(listID, e) {
+    e.preventDefault();
+
+    const list = this.Lists.withID(listID);
+
+    const formData = new FormData(e.target);
+    const forTeamID = formData.get('shareListWithTeamSelectTeam');
+
+    try {
+      // Update the list using the API and update it in the local list of lists
+      await list.updateListType(ListTypeNo.TEAM_CUSTOM, forTeamID);
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        `Could not update list. ${
+          error instanceof Reaction ? error.message : ''
+        }`
+      );
+      return;
+    }
+
+    this.showNotification(
+      NotificationSeverity.SUCCESS,
+      `Updated prompts list "${sanitizeInput(list.Comment)}".`
+    );
+
+    if (forTeamID === 'NEW') {
+      // refresh teams
+      await this.Client.checkUserStatus();
+    }
+
+    this.hideShareListWithTeamModal();
+
+    await this.insertPromptTemplatesSection();
   },
 
   async resetFilters() {
@@ -3090,6 +3752,14 @@ ${textContent}
       variableWrapper.classList.add('AIPRM__hidden');
     } else {
       const langWrapper = document.querySelector('#language-select-wrapper');
+
+      if (!langWrapper) {
+        console.error(
+          'insertVariablesInputWrapper: No language select wrapper found'
+        );
+        return;
+      }
+
       variableWrapper = document.createElement('div');
       variableWrapper.id = variableWrapperID;
 
@@ -3209,8 +3879,10 @@ ${textContent}
       return;
     }
 
-    // Click the "Submit" button
-    button.click();
+    // Click the "Submit" button with a delay of 500ms
+    setTimeout(() => {
+      button.click();
+    }, 500);
   },
 
   hideContinueActionsButton() {
@@ -3296,13 +3968,18 @@ ${textContent}
         '**ChatGPT:**\n' +
         [...wrapper.children]
           .map((node) => {
+            let language;
+
             switch (node.nodeName) {
               case 'PRE':
-                return `\`\`\`${
+                language =
                   node
                     .getElementsByTagName('code')[0]
-                    .classList[2].split('-')[1]
-                }\n${node.innerText.replace(/^Copy code/g, '').trim()}\n\`\`\``;
+                    ?.classList[2]?.split('-')[1] || '';
+
+                return `\`\`\`${language}\n${node.innerText
+                  .replace(/^Copy code/g, '')
+                  .trim()}\n\`\`\``;
               default:
                 return `${node.innerHTML}`;
             }
@@ -3361,14 +4038,8 @@ ${textContent}
 
   /** @param {HTMLFormElement} form */
   hidePublicPromptFormElements(form) {
-    // Disable the "Share as public" checkbox
-    form.elements['Public'].type = 'hidden';
-    form.elements['Public'].disabled = true;
-    form.elements['Public'].checked = false;
-
-    // Hide the "Share as public" checkbox
-    document.getElementById('savePromptForm-public-checkbox').style =
-      'display: none;';
+    // Disable "Public" option for Prompt type
+    document.getElementById('PromptTypeNo-public').disabled = true;
 
     // Hide the "Share as public" disclaimer
     document.getElementById('savePromptForm-public-disclaimer').style =
@@ -3378,6 +4049,20 @@ ${textContent}
   // Edit the prompt template
   async editPromptTemplate(idx) {
     const prompt = (await this.getCurrentPromptTemplates())[idx];
+    if (!prompt.Prompt) {
+      try {
+        const promptFetch = await this.Client.getPrompt(prompt.ID, true);
+        prompt.Prompt = promptFetch.Prompt;
+      } catch (error) {
+        this.showNotification(
+          NotificationSeverity.ERROR,
+          `Could not load the prompt template. ${
+            error instanceof Reaction ? error.message : ''
+          }`
+        );
+        return;
+      }
+    }
 
     // Only allow editing of own prompt templates
     if (
@@ -3393,7 +4078,9 @@ ${textContent}
     // Pre-fill the prompt template modal with the prompt template
     const form = document.getElementById('savePromptForm');
 
-    form.elements['Prompt'].value = prompt.Prompt;
+    const promptText = prompt.Prompt.replace(headerRegexPattern, '');
+    form.elements['Prompt'].value = promptText;
+    form.elements['PromptTypeNo'].value = prompt.PromptTypeNo;
     form.elements['Teaser'].value = prompt.Teaser;
     form.elements['PromptHint'].value = prompt.PromptHint;
     form.elements['Title'].value = prompt.Title;
@@ -3415,11 +4102,6 @@ ${textContent}
         // Forked prompts for non-admins are always private
         this.hidePublicPromptFormElements(form);
       }
-    }
-
-    // Check the "Share as public" checkbox if the prompt template is public
-    if (prompt.PromptTypeNo === PromptTypeNo.PUBLIC) {
-      form.elements['Public'].checked = true;
     }
 
     // Trigger onchange event on Topics to update available Activities
@@ -3472,6 +4154,9 @@ ${textContent}
           (promptTemplate) => promptTemplate.ID !== prompt.ID
         );
       }
+
+      // remove template using ID from lists
+      this.Lists.removeItemByPromptIDFromListsByType(prompt.ID);
     } catch (error) {
       this.showNotification(
         NotificationSeverity.ERROR,
@@ -3580,7 +4265,9 @@ ${textContent}
         if (prompt.PromptTypeNo !== PromptTypeNo.PUBLIC) {
           this.showNotification(
             NotificationSeverity.WARNING,
-            'The link to the prompt template was copied to your clipboard.<br>This prompt is not shared as public. Only you can access it.'
+            `The link to the prompt template was copied to your clipboard.<br>This prompt is not shared as public. Only you ${
+              prompt.PromptTypeNo === PromptTypeNo.TEAM ? 'and your team' : ''
+            } can access it.`
           );
 
           return;
@@ -3609,7 +4296,7 @@ ${textContent}
     // If there are no templates, skip
     if (!templates || !Array.isArray(templates)) return;
 
-    this.selectPromptTemplate(templates[idx]);
+    await this.selectPromptTemplate(templates[idx]);
 
     // Hide the "Continue Writing" button (prompt selected/new chat)
     this.hideContinueActionsButton();
@@ -3679,10 +4366,31 @@ ${textContent}
    *
    * @param {Prompt} template
    */
-  selectPromptTemplate(template) {
+  async selectPromptTemplate(template) {
+    if (template && !template.Prompt) {
+      try {
+        const templateFetch = await this.Client.getPrompt(template.ID, true);
+        template.Prompt = templateFetch.Prompt;
+      } catch (error) {
+        this.showNotification(
+          NotificationSeverity.ERROR,
+          `Could not load the prompt template. ${
+            error instanceof Reaction ? error.message : ''
+          }`
+        );
+        return;
+      }
+    }
+
     const textarea = document.querySelector(
       `textarea:not([name^="${variableIDPrefix}"])`
     );
+
+    if (!textarea) {
+      console.error('selectPromptTemplate: No textarea found');
+      return;
+    }
+
     const parent = textarea.parentElement;
     let wrapper = document.createElement('div');
     wrapper.id = 'prompt-wrapper';
@@ -3710,17 +4418,31 @@ ${textContent}
       wrapper.innerHTML = /*html*/ `
         <span class="${css`tag`}" title="${sanitizeInput(template.Teaser)}">
           ${sanitizeInput(template.Title)}
+
+          <a title="Deselect prompt / New chat"
+            class="AIPRM__ml-3 AIPRM__align-middle AIPRM__inline-block AIPRM__rounded-md hover:AIPRM__bg-gray-100 hover:AIPRM__text-gray-700 dark:AIPRM__text-gray-400 dark:hover:AIPRM__bg-gray-700 dark:hover:AIPRM__text-gray-200 disabled:dark:hover:AIPRM__text-gray-400" 
+            onclick="event.stopPropagation(); AIPRM.selectPromptTemplateByIndex(null)">
+            ${svg('Cross')}
+          </a>
         </span>
 
         ${
-          template.AuthorURL && template.AuthorName
+          template.AuthorName
             ? /*html*/ `
               <span class="AIPRM__text-xs">by 
-                <a href="${sanitizeInput(template.AuthorURL)}"
-                  class="AIPRM__mx-1 AIPRM__underline" 
-                  onclick="event.stopPropagation()"
-                  rel="noopener noreferrer" target="_blank"
-                  title="Created by">${sanitizeInput(template.AuthorName)}</a>
+                ${
+                  template.AuthorURL
+                    ? /*html*/ `<a href="${sanitizeInput(template.AuthorURL)}"
+                      class="AIPRM__mx-1 AIPRM__underline" 
+                      onclick="event.stopPropagation()"
+                      rel="noopener noreferrer" target="_blank"
+                      title="Created by">${sanitizeInput(
+                        template.AuthorName
+                      )}</a>`
+                    : /*html*/ `<span class="AIPRM__mx-1" title="Created by ${sanitizeInput(
+                        template.AuthorName
+                      )}">${sanitizeInput(template.AuthorName)}</span>`
+                }
               </span>
             `
             : ''
@@ -3915,6 +4637,7 @@ ${textContent}
   canCreatePromptTemplate() {
     return (
       this.canCreatePublicPromptTemplate() ||
+      this.canCreateTeamPromptTemplate() ||
       this.canCreatePrivatePromptTemplate()
     );
   },
@@ -3924,6 +4647,14 @@ ${textContent}
     return (
       this.isAdmin() ||
       this.Client.UserQuota.canCreatePrivatePromptTemplate(this.OwnPrompts)
+    );
+  },
+
+  // current user can create private prompt template
+  canCreateTeamPromptTemplate() {
+    return (
+      this.isAdmin() ||
+      this.Client.UserQuota.canCreateTeamPromptTemplate(this.OwnPrompts)
     );
   },
 
@@ -4064,13 +4795,28 @@ ${textContent}
     }
 
     const prompt = (await this.getCurrentPromptTemplates())[idx];
+    if (!prompt.Prompt) {
+      try {
+        const promptFetch = await this.Client.getPrompt(prompt.ID, true);
+        prompt.Prompt = promptFetch.Prompt;
+      } catch (error) {
+        this.showNotification(
+          NotificationSeverity.ERROR,
+          `Could not load the prompt template. ${
+            error instanceof Reaction ? error.message : ''
+          }`
+        );
+        return;
+      }
+    }
 
     await this.showViewPromptModal(idx);
 
     // Pre-fill the prompt template modal with the prompt template
     const form = document.getElementById('viewPromptForm');
 
-    form.elements['Prompt'].value = prompt.Prompt;
+    const promptText = prompt.Prompt.replace(headerRegexPattern, '');
+    form.elements['Prompt'].value = promptText;
     form.elements['Teaser'].value = prompt.Teaser;
     form.elements['PromptHint'].value = prompt.PromptHint;
     form.elements['Title'].value = prompt.Title;
@@ -4090,7 +4836,8 @@ ${textContent}
 
     form.elements['ForkedFromPromptID'].value = promptOriginal.ID;
 
-    form.elements['Prompt'].value = promptOriginal.Prompt;
+    const promptText = promptOriginal.Prompt.replace(headerRegexPattern, '');
+    form.elements['Prompt'].value = promptText;
     form.elements['Teaser'].value = promptOriginal.Teaser;
     form.elements['PromptHint'].value = promptOriginal.PromptHint;
     form.elements['Title'].value = promptOriginal.Title;
@@ -4099,15 +4846,14 @@ ${textContent}
     // Update the "Forked from Prompt Template" link
     this.updateForkedFromPromptLink(promptOriginal.ID);
 
-    // Check the "Share as public" checkbox if the prompt template is public
-    if (
-      this.isAdminMode() &&
-      promptOriginal.PromptTypeNo === PromptTypeNo.PUBLIC
-    ) {
-      form.elements['Public'].checked = true;
-    }
+    form.elements['PromptTypeNo'].value = promptOriginal.PromptTypeNo;
+
     // Forked prompts for non-admins are always private
-    else if (!this.isAdminMode()) {
+    if (!this.isAdminMode()) {
+      if (promptOriginal.PromptTypeNo === PromptTypeNo.PUBLIC) {
+        form.elements['PromptTypeNo'].value = PromptTypeNo.PRIVATE;
+      }
+
       this.hidePublicPromptFormElements(form);
     }
 
@@ -4127,7 +4873,9 @@ ${textContent}
     const form = document.getElementById('savePromptForm');
 
     // Do not set prompt.ID from original prompt template to create a new prompt
-    form.elements['Prompt'].value = promptOriginal.Prompt;
+    const promptText = promptOriginal.Prompt.replace(headerRegexPattern, '');
+    form.elements['Prompt'].value = promptText;
+    form.elements['PromptTypeNo'].value = promptOriginal.PromptTypeNo;
     form.elements['Teaser'].value = promptOriginal.Teaser;
     form.elements['PromptHint'].value = promptOriginal.PromptHint;
     form.elements['Title'].value = promptOriginal.Title;
@@ -4146,11 +4894,6 @@ ${textContent}
         // Forked prompts for non-admins are always private
         this.hidePublicPromptFormElements(form);
       }
-    }
-
-    // Check the "Share as public" checkbox if the prompt template is public
-    if (promptOriginal.PromptTypeNo === PromptTypeNo.PUBLIC) {
-      form.elements['Public'].checked = true;
     }
 
     // Trigger onchange event on Topics to update available Activities
@@ -4354,13 +5097,9 @@ ${textContent}
    * @param {string} idx
    */
   async addToList(idx) {
-    if (!this.Client.UserQuota.canUseCustomList()) {
-      return;
-    }
-
     const prompt = (await this.getCurrentPromptTemplates())[idx];
 
-    const lists = this.Lists.getCustom();
+    const lists = this.Lists.getCustomWithWriteAccess(this.Client.UserQuota);
 
     const AIPRMVerifiedList = this.Lists.getAIPRMVerified();
 
@@ -4414,7 +5153,7 @@ ${textContent}
    * @param {List[]} lists
    * @param {Prompt} prompt
    */
-  showListSelectionModal(lists, prompt) {
+  showListSelectionModal(lists, prompt, onlyTeamLists = false) {
     let listSelectionModal = document.getElementById('listSelectionModal');
 
     // if modal does not exist, create it, add event listener on submit and append it to body
@@ -4422,10 +5161,17 @@ ${textContent}
       listSelectionModal = document.createElement('div');
       listSelectionModal.id = 'listSelectionModal';
 
-      listSelectionModal.addEventListener(
-        'submit',
-        this.handleListSelectionModalSubmit.bind(this)
-      );
+      if (onlyTeamLists) {
+        listSelectionModal.addEventListener(
+          'submit',
+          this.handleListSelectionModalSubmit.bind(this, prompt)
+        );
+      } else {
+        listSelectionModal.addEventListener(
+          'submit',
+          this.handleListSelectionModalSubmit.bind(this, undefined)
+        );
+      }
 
       document.body.appendChild(listSelectionModal);
     }
@@ -4448,17 +5194,39 @@ ${textContent}
                     prompt.ID
                   )}">          
 
-                  <h3 class="${css`h3`} AIPRM__my-4">Choose a list</h3>
+                  <h3 class="${css`h3`} AIPRM__my-4">${
+      onlyTeamLists ? 'Choose Team List to add to' : 'Choose a list'
+    }</h3>
 
                   <label class="AIPRM__block">Lists</label>
                   <select name="listID" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
                     ${lists
-                      .map(
-                        (list) =>
-                          `<option value="${sanitizeInput(
+                      .map((list) => {
+                        if (
+                          list.ListTypeNo === ListTypeNo.CUSTOM ||
+                          list.HasWriteAccessForTeamMember(
+                            this.Client.UserTeamM
+                          )
+                        ) {
+                          const disabledFlag =
+                            list.ListTypeNo == ListTypeNo.TEAM_CUSTOM &&
+                            prompt.PromptTypeNo === PromptTypeNo.PRIVATE
+                              ? 'disabled'
+                              : '';
+
+                          return `<option value="${sanitizeInput(
                             list.ID
-                          )}">${sanitizeInput(list.Comment)}</option>`
-                      )
+                          )}" ${disabledFlag} ${
+                            this.PromptTemplatesList === list.ID
+                              ? 'selected'
+                              : ''
+                          }>${sanitizeInput(list.Comment)}${
+                            list.ListTypeNo == ListTypeNo.TEAM_CUSTOM
+                              ? ' (Team List)'
+                              : ''
+                          }</option>`;
+                        }
+                      })
                       .join('')}
 
                       <option disabled>_________</option>
@@ -4471,15 +5239,75 @@ ${textContent}
                   </select>
                   
                   <div id="createNewList" class="${
-                    lists.length ? 'AIPRM__hidden' : ''
+                    lists.length &&
+                    (this.Lists.withType(ListTypeNo.CUSTOM) !== undefined ||
+                      prompt.PromptTypeNo !== PromptTypeNo.PRIVATE)
+                      ? 'AIPRM__hidden'
+                      : ''
                   }">
                     <h3 class="${css`h3`} AIPRM__my-4 AIPRM__mt-6">Create a new list</h3>
                     
                     <label class="AIPRM__block">List Name</label>
                     <input type="text" name="listName" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" ${
-                      !lists.length ? 'required' : ''
+                      !(
+                        lists.length ||
+                        (prompt.PromptTypeNo !== PromptTypeNo.PRIVATE &&
+                          this.Lists.withType(ListTypeNo.CUSTOM) !== undefined)
+                      )
+                        ? 'required'
+                        : ''
                     }>
+
+                    ${
+                      prompt.PromptTypeNo !== PromptTypeNo.PRIVATE &&
+                      this.Client.UserQuota?.hasTeamsFeatureEnabled()
+                        ? /*html*/ `
+                        <label class="AIPRM__text-sm AIPRM__flex AIPRM__items-center" id="savePromptForm-public-checkbox">
+                          <input id="createNewListShareWithTeam" name="createNewListShareWithTeam" 
+                            type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
+                            onchange="AIPRM.toggleCreateNewListSelectTeam();"
+                            ${onlyTeamLists ? 'checked disabled' : ''}> 
+                          Share with Team
+                        </label>
+
+                        <div id="createNewListSelectTeam" class="${
+                          !onlyTeamLists ? 'AIPRM__hidden' : ''
+                        }">
+                          <select id="createNewListSelectTeam" name="createNewListSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                            ${
+                              this.Client.OwnTeamS?.length > 0
+                                ? this.Client.OwnTeamS.map(
+                                    (team) =>
+                                      /*html*/ `<option value="${sanitizeInput(
+                                        team.TeamID
+                                      )}">${sanitizeInput(
+                                        team.TeamName
+                                      )}</option>`
+                                  ).join('')
+                                : /*html*/ `<option value="NEW">My First Team</option>`
+                            }
+                          </select>
+
+                          ${
+                            this.Client.OwnTeamS?.length > 0
+                              ? /*html*/ `<a href="${AppTeamURL}" target="blank" class="AIPRM__text-sm AIPRM__text-gray-500 AIPRM__underline">Manage My Teams</a>`
+                              : ''
+                          }
+                        </div>
+                        `
+                        : ''
+                    }
                   </div>
+
+                  ${
+                    this.Client.UserQuota?.hasTeamsFeatureEnabled() &&
+                    prompt.PromptTypeNo === PromptTypeNo.PRIVATE &&
+                    this.Lists.withType(ListTypeNo.TEAM_CUSTOM) !== undefined
+                      ? /*html*/ `
+                      <p class="AIPRM__mt-4 AIPRM__text-[10px]" id="privatePromptInTeamList">Private prompts cannot be shared in Team lists. Please update prompt to Team prompt before adding it to Team list.</p>
+                      `
+                      : ''
+                  }
 
                 </div>
 
@@ -4524,8 +5352,19 @@ ${textContent}
     });
   },
 
+  toggleCreateNewListSelectTeam(e) {
+    const checkbox = document.querySelector('#createNewListShareWithTeam');
+    const section = document.querySelector('#createNewListSelectTeam');
+
+    if (checkbox.checked) {
+      section.classList.remove('AIPRM__hidden');
+    } else {
+      section.classList.add('AIPRM__hidden');
+    }
+  },
+
   // Handle submit of list selection modal form and add prompt to list or create a new list and add prompt to it
-  async handleListSelectionModalSubmit(e) {
+  async handleListSelectionModalSubmit(promptToSave = undefined, e) {
     e.preventDefault();
 
     const formData = new FormData(e.target);
@@ -4542,6 +5381,19 @@ ${textContent}
       return;
     }
 
+    const shareWithTeamCheckbox = document.querySelector(
+      '#createNewListShareWithTeam'
+    );
+    const shareWithTeam =
+      shareWithTeamCheckbox && shareWithTeamCheckbox.checked;
+    const forTeamID = formData.get('createNewListSelectTeam');
+
+    if (!shareWithTeam && !listID) {
+      if (!this.Client.UserQuota.canUseCustomList()) {
+        return;
+      }
+    }
+
     const promptID = formData.get('promptID');
 
     let list;
@@ -4549,13 +5401,51 @@ ${textContent}
     try {
       // existing list - add prompt to it
       if (listID) {
-        list = this.Lists.withID(listID);
+        if (promptToSave) {
+          await this.Client.savePrompt(promptToSave, listID);
 
-        if (!this.Client.UserQuota.canAddToCustomList(list)) {
+          list = this.Lists.withID(listID);
+
+          const creationTime = new Date();
+          list.list.Items.push({
+            Comment: '',
+            CreationTime: creationTime.toISOString(),
+            ItemOrder: 0,
+            ItemStatusNo: ItemStatusNo.ACTIVE,
+            ListID: listID,
+            PromptID: promptID,
+            RevisionTime: creationTime.toISOString(),
+          });
+        } else {
+          list = this.Lists.withID(listID);
+
+          if (!this.Client.UserQuota.canAddToCustomList(list)) {
+            return;
+          }
+
+          await list.add({ ID: promptID });
+        }
+      }
+      // new team list - create it and add prompt to it
+      else if (shareWithTeam) {
+        if (!forTeamID) {
+          this.showNotification(
+            NotificationSeverity.ERROR,
+            'Please select a team.'
+          );
           return;
         }
 
-        await list.add({ ID: promptID });
+        list = await this.Lists.create(
+          this.Client,
+          ListTypeNo.TEAM_CUSTOM,
+          listName,
+          {
+            PromptID: promptID,
+            Comment: '',
+          },
+          forTeamID
+        );
       }
       // new list - create it and add prompt to it
       else {
@@ -4601,7 +5491,7 @@ ${textContent}
     this.hideModal('listSelectionModal');
 
     // re-insert the prompt templates section if it's a new list
-    if (!listID) {
+    if (!listID || listID === this.PromptTemplatesList) {
       this.insertPromptTemplatesSection();
     }
   },
