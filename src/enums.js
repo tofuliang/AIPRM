@@ -73,9 +73,11 @@ const VoteTypeNo = {
 /** @enum {number} */
 const SortModeNo = {
   //UNKNOWN: 0, // not used & not displayed in the "Sort by" dropdown
+  TOP_USAGE: 8,
+  TOP_VOTES_TRENDING: 2,
+  TOP_VOTES_ABSOLUTE: 16,
   TOP_VIEWS: 1,
-  TOP_VOTES: 2,
-  LATEST_UPDATES: 4,
+  LATEST_UPDATES: 4
 };
 
 /** @enum {number} */
@@ -195,6 +197,13 @@ const PromptFeatureBitset = {
   LIVE_CRAWLING: 1,
 };
 
+/** @enum {number} */
+const ModelStatusNo = {
+  UNKNOWN: 0,
+  ACTIVE: 1,
+  DEPRECATED: 2,
+};
+
 export {
   PromptTemplatesType,
   NotificationSeverity,
@@ -218,4 +227,5 @@ export {
   MemberRoleNo,
   FeatureBitset,
   PromptFeatureBitset,
+  ModelStatusNo,
 };

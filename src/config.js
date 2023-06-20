@@ -69,6 +69,7 @@ const WritingStyleFeedURL =
   'https://api.aiprm.com/csv/writing_styles-v2-20230216.csv?v=';
 const ContinueActionsFeedURL =
   'https://api.aiprm.com/csv/continue_actions-20230216.csv?v=';
+const ModelFeedURL = 'https://api.aiprm.com/csv/models-20230612.csv?v=';
 const EndpointConversation = 'https://chat.openai.com/backend-api/conversation';
 const AppShort = 'AIPRM';
 const AppName = 'AIPRM for ChatGPT';
@@ -107,6 +108,7 @@ export {
   ToneFeedURL,
   WritingStyleFeedURL,
   ContinueActionsFeedURL,
+  ModelFeedURL,
   APIEndpointAPP,
   AppAccountURL,
   AppCommunityForumURL,
@@ -121,7 +123,7 @@ export {
 
 /** @typedef {{Enabled: boolean, Config: {Selectors: Object.<string, string>}} WatermarkConfig */
 
-/** @typedef {{FirstPrompt: string, ChatLogContainer: string}} SelectorConfig */
+/** @typedef {{FirstPrompt: string, ChatLogContainer: string, ConversationResponse: string}} SelectorConfig */
 
 /** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig}, Selectors: SelectorConfig}} RemoteConfig */
 

@@ -264,6 +264,18 @@ export class UserQuota {
     quota.TotalPrivateLists = 999;quota.MaxPrivateListItems = 9999;quota.MaxLevel = 999999;this.#quota = quota;
   }
 
+  getMaxPlanLevelLabel() {
+    if (!this.hasPaidPlan()) {
+      return 'Free';
+    }
+
+    const maxPlanLevel = Object.keys(PlanLevelNo).find(
+      (key) => PlanLevelNo[key] === this.#quota.MaxLevel
+    );
+
+    return maxPlanLevel ? `AIPRM ${maxPlanLevel}` : 'Unknown';
+  }
+
   hasPaidPlan() {
     return this.#user.IsLinked && this.#quota.MaxLevel >= PlanLevelNo.BASIC;
   }

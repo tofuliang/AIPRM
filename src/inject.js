@@ -11,6 +11,7 @@ import {
   Config,
   ConfigURL,
   ContinueActionsFeedURL,
+  ModelFeedURL,
   CrawledSourcePlaceholder,
   CrawledTextPlaceholder,
   EndpointConversation,
@@ -25,6 +26,7 @@ import {
   TopicFeedURL,
   WritingStyleFeedURL,
   AppTeamURL,
+  AppPricingURL,
 } from './config.js';
 
 /* eslint-disable no-unused-vars */
@@ -42,6 +44,7 @@ import {
   ItemStatusNo,
   PromptFeatureBitset,
   ExternalSystemNo,
+  ModelStatusNo,
 } from './enums.js';
 /* eslint-enable */
 
@@ -61,6 +64,8 @@ import {
   svg,
   hasFeature,
 } from './utils.js';
+
+import { MultiselectDropdown } from './multiselect-dropdown.js';
 
 /**
  * @typedef {Object} PromptVariable
@@ -93,6 +98,7 @@ import {
  * @property {boolean} [IsHidden]
  * @property {boolean} [IsVerified]
  * @property {PromptVariable[]} [PromptVariables]
+ * @property {string[]} [ModelS]
  */
 
 /** @typedef {{langcode: string, languageEnglish: string, languageLabel: string}} Language */
@@ -107,11 +113,15 @@ import {
 
 /** @typedef {{ID: number, Label: string, Prompt: string}} ContinueAction */
 
+/** @typedef {{ID: string, LabelUser: string, LabelAuthor: string, StatusNo: ModelStatusNo}} Model */
+
 const DefaultPromptActivity = 'all';
 const DefaultPromptTopic = 'all';
 const DefaultTargetLanguage = 'English*';
+const DefaultPromptModel = 'all';
 
 const lastPromptTopicKey = 'lastPromptTopic';
+const lastPromptModelKey = 'lastPromptModel';
 const lastTargetLanguageKey = 'lastTargetLanguage';
 const lastPageSizeKey = 'lastPageSize';
 const lastPromptTemplateTypeKey = 'lastPromptTemplateType';
@@ -130,6 +140,51 @@ const variableWrapperID = 'AIPRM__variable-wrapper';
 const variableIDPrefix = 'AIPRM__VARIABLE';
 
 const headerRegexPattern = /# Prompt by AIPRM, Corp\.[\s\S]*?---\n/;
+
+const modelMultiselectOptions = {
+  style: { width: '100%' },
+  placeholder: 'Not specific',
+  txtSelected: 'Models Selected',
+  classPrefix: 'AIPRM__',
+  height: '12rem',
+  optionModifier: (o, op) => {
+    var modelStatusNo = o.attributes['AIPRMModelStatusNo']?.value;
+
+    if (modelStatusNo == ModelStatusNo.ACTIVE) {
+      op.title = 'Active';
+    } else {
+      op.classList.add('AIPRM__line-through');
+      op.title = 'Deprecated';
+    }
+  },
+  optionSelectedModifier: (o, op) => {
+    var modelStatusNo = o.attributes['AIPRMModelStatusNo']?.value;
+
+    if (modelStatusNo != ModelStatusNo.ACTIVE) {
+      op.classList.add('AIPRM__line-through');
+    }
+  },
+  selectedTitleModifier: (sels, div) => {
+    var title = 'This prompt is not optimized for specific model';
+
+    if (sels.length > 0) {
+      title = sels
+        .map((o) => {
+          var t = o.text;
+
+          var modelStatusNo = o.attributes['AIPRMModelStatusNo']?.value;
+          if (modelStatusNo != ModelStatusNo.ACTIVE) {
+            t = t + ' (Deprecated)';
+          }
+
+          return t;
+        })
+        .join(', ');
+    }
+
+    div.setAttribute('title', title);
+  },
+};
 
 window.AIPRM = {
   // Save a reference to the original fetch function
@@ -162,7 +217,10 @@ window.AIPRM = {
 
   // Set default sort mode
   /** @type {SortModeNo} */
-  PromptSortMode: SortModeNo.TOP_VOTES,
+  PromptSortMode: SortModeNo.TOP_VOTES_TRENDING,
+
+  // Set default model
+  PromptModel: localStorage.getItem(lastPromptModelKey) || DefaultPromptModel,
 
   // Set default search query
   PromptSearch: '',
@@ -198,6 +256,12 @@ window.AIPRM = {
 
   /** @type {ContinueAction[]} */
   ContinueActions: [],
+
+  /** @type {Model[]} */
+  Models: [],
+
+  /** @type {Model[]} */
+  ModelsActive: [],
 
   /** @type {Lists} */
   Lists: new Lists(),
@@ -258,6 +322,7 @@ window.AIPRM = {
       this.fetchConfig(),
       this.fetchLanguages(),
       this.fetchMessages(false),
+      this.fetchModels(),
       clientInitialized ? Promise.resolve() : this.Client.init(),
     ]);
 
@@ -1033,6 +1098,44 @@ ${textContent}
     );
   },
 
+  // Fetch list of models from a remote CSV file
+  fetchModels() {
+    return (
+      this.fetch(ModelFeedURL + this.CacheBuster)
+        // Convert the response to text
+        .then((res) => res.text())
+        // Convert the CSV text to an array of records
+        .then((csv) => this.CSVToArray(csv))
+        // Map the records to model objects with properties 'ID' and 'Label'
+        .then((records) => {
+          return (
+            records
+              .map(([ID, LabelUser, LabelAuthor, StatusNo]) => {
+                return {
+                  ID: ID,
+                  LabelUser,
+                  LabelAuthor,
+                  StatusNo: parseInt(StatusNo),
+                };
+              })
+              // Filter out records that do not have an ID, or it is the header row (with "ID" as its title)
+              .filter(({ ID }) => ID && ID !== 'ID')
+          );
+        })
+        .then((models) => {
+          // sort the models by Label
+          this.Models = models.sort((a, b) =>
+            a.LabelAuthor.localeCompare(b.LabelAuthor)
+          );
+
+          // filter out models that are not active
+          this.ModelsActive = this.Models.filter(
+            (model) => model.StatusNo === ModelStatusNo.ACTIVE
+          );
+        })
+    );
+  },
+
   // Load Prompt Templates type and list ID from local storage
   loadPromptTemplateTypeAndListFromLocalStorage() {
     const lastPromptTemplateType = localStorage.getItem(
@@ -1141,6 +1244,21 @@ ${textContent}
 
     if (render) {
       await this.insertPromptTemplatesSection();
+    }
+  },
+
+  /**
+   * Check if a template is for model
+   *
+   * @param {Prompt} template
+   * @param {string} modelID
+   * @returns {boolean}
+   */
+  isTemplateForModel(template, modelID) {
+    if (template.ModelS?.find((model) => model === modelID)) {
+      return true;
+    } else {
+      return false;
     }
   },
 
@@ -1370,7 +1488,73 @@ ${textContent}
     // Add "Save prompt as template" button, if new prompt was added
     if (document.querySelector('.whitespace-pre-wrap')) {
       this.insertSavePromptAsTemplateButton();
+
+      this.insertPromptTemplatesSidebar();
     }
+  },
+
+  // Add AIPRM sidebar icon and sidebar with prompt templates
+  insertPromptTemplatesSidebar() {
+    // Add icon for sidebar if not present, yet
+    let sidebarIcon = document.getElementById('AIPRM__sidebar-icon');
+
+    // Add sidebar icon and sidebar if not present, yet
+    if (sidebarIcon) {
+      return;
+    }
+
+    sidebarIcon = document.createElement('div');
+    sidebarIcon.id = 'AIPRM__sidebar-icon';
+
+    sidebarIcon.className =
+      'AIPRM__p-2 AIPRM__items-center AIPRM__transition-colors AIPRM__duration-200 AIPRM__cursor-pointer AIPRM__text-sm AIPRM__rounded-md AIPRM__border AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__border-black/10 dark:AIPRM__border-white/20 hover:AIPRM__bg-gray-50 dark:hover:AIPRM__bg-gray-700 AIPRM__cursor-pointer AIPRM__fixed AIPRM__top-2 AIPRM__right-4 AIPRM__z-30';
+
+    sidebarIcon.title = 'Open AIPRM sidebar';
+
+    sidebarIcon.innerHTML =
+      /*html*/ '<div class="AIPRM__invert dark:AIPRM__filter-none AIPRM__sidebar-icon AIPRM__w-12 AIPRM__h-12"></div>';
+
+    // Add click event listener to open/close sidebar
+    sidebarIcon.addEventListener('click', () => {
+      const sidebar = document.getElementById('AIPRM__sidebar');
+      const sidebarOpen = sidebar.classList.contains('AIPRM__translate-x-0');
+
+      // hide icon when sidebar is open
+      sidebarIcon.style = !sidebarOpen ? 'display: none;' : '';
+
+      // animate opening and closing of sidebar
+      sidebar.classList.toggle('AIPRM__translate-x-0');
+      sidebar.classList.toggle('AIPRM__translate-x-full');
+
+      // add prompt templates section to sidebar
+      this.insertPromptTemplatesSection(true);
+    });
+
+    // Prepare sidebar element with sidebar icon and prompt templates section
+    const sidebar = document.createElement('div');
+    sidebar.id = 'AIPRM__sidebar';
+
+    sidebar.className =
+      '2xl:AIPRM__w-7/12 lg:AIPRM__w-3/4 md:AIPRM__w-11/12 AIPRM__w-full AIPRM__h-full AIPRM__bg-white AIPRM__text-gray-700 AIPRM__shadow-lg AIPRM__absolute AIPRM__right-0 AIPRM__overflow-auto AIPRM__z-20 dark:AIPRM__bg-gray-800 dark:AIPRM__text-white AIPRM__ease-in-out AIPRM__duration-300 AIPRM__translate-x-full';
+
+    sidebar.innerHTML = /*html*/ `
+          <div class="AIPRM__relative" title="Close AIPRM sidebar" id="AIPRM__sidebar-container">
+            <div class="AIPRM__p-2 AIPRM__items-center AIPRM__transition-colors AIPRM__duration-200 AIPRM__cursor-pointer AIPRM__text-sm AIPRM__rounded-md AIPRM__border AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__border-black/10 dark:AIPRM__border-white/20 hover:AIPRM__bg-gray-50 dark:hover:AIPRM__bg-gray-700 AIPRM__absolute AIPRM__top-0 AIPRM__left-4 AIPRM__z-30" onclick="document.getElementById('AIPRM__sidebar-icon').click()">
+              <div class="AIPRM__invert dark:AIPRM__filter-none AIPRM__sidebar-icon AIPRM__w-12 AIPRM__h-12"></div>
+            </div>
+
+            <h1 style="display: none;" class="text-4xl"></h1>
+          </div>
+        `;
+
+    // Add sidebar icon and sidebar to the page
+    document
+      .querySelector('.flex.flex-col.text-sm.dark\\:bg-gray-800')
+      .appendChild(sidebarIcon);
+
+    document
+      .querySelector('.flex.flex-col.text-sm.dark\\:bg-gray-800')
+      .appendChild(sidebar);
   },
 
   // Add "Save prompt as template" button to the user prompt container next to the "Edit" button
@@ -1586,11 +1770,17 @@ ${textContent}
     e.preventDefault();
 
     /** @type Prompt */
-    const prompt = {};
+    const prompt = {
+      ModelS: [],
+    };
     const formData = new FormData(e.target);
 
     for (const [key, value] of formData) {
-      prompt[key] = value;
+      if (key === 'ModelS') {
+        prompt[key] = [...prompt.ModelS, value];
+      } else {
+        prompt[key] = value;
+      }
     }
 
     prompt.PromptTypeNo = parseInt(prompt.PromptTypeNo);
@@ -2176,7 +2366,7 @@ ${textContent}
                   </div>
 
                   <div class="AIPRM__flex">
-                    <div class="AIPRM__w-full">
+                    <div class="AIPRM__mr-4 AIPRM__w-full">
                       <label>Who can see this?</label>
                       <select name="PromptTypeNo" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
                         <option value="${
@@ -2190,6 +2380,20 @@ ${textContent}
                         <option id="PromptTypeNo-public" value="${
                           PromptTypeNo.PUBLIC
                         }">Everyone (Public)</option>
+                      </select>
+                    </div>
+                    <div class="AIPRM__w-full">
+                      <label>Made for</label>
+                      <select multiple multiselect-max-items="1" multiselect-hide-x="true"
+                        name="ModelS" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                        ${this.Models.map(
+                          (model) => /*html*/ `
+                              <option value="${sanitizeInput(
+                                model.ID
+                              )}" AIPRMModelStatusNo="${
+                            model.StatusNo
+                          }">${sanitizeInput(model.LabelAuthor)}</option>`
+                        ).join('')}
                       </select>
                     </div>
                   </div>
@@ -2397,7 +2601,7 @@ ${textContent}
   },
 
   /**
-   * Filter templates based on selected activity and search query
+   * Filter templates based on selected activity, model and search query
    *
    * @param {Prompt[]} templates
    * @returns {Promise<Prompt[]>} filtered templates
@@ -2418,6 +2622,8 @@ ${textContent}
       return (
         (this.PromptActivity === DefaultPromptActivity ||
           template.Category === this.PromptActivity) &&
+        (this.PromptModel === DefaultPromptModel ||
+          this.isTemplateForModel(template, this.PromptModel)) &&
         (!this.PromptSearch ||
           template.Teaser.toLowerCase().includes(
             this.PromptSearch.toLowerCase()
@@ -2430,7 +2636,7 @@ ${textContent}
   },
 
   // This function inserts a section containing a list of prompt templates into the chat interface
-  async insertPromptTemplatesSection() {
+  async insertPromptTemplatesSection(inAIPRMSidebar = false) {
     // If there are no topics or activities do not insert the section, yet
     if (!this.Topics.length || !this.Activities.length) {
       console.error(
@@ -2499,6 +2705,8 @@ ${textContent}
 
     // Add 'AIPRM__w-full' class to the parent element (to make it full width)
     parent.classList.add('AIPRM__w-full');
+
+    const isSidebarView = parent.id?.includes('AIPRM__sidebar-container');
 
     // Get the current page number and page size from the promptTemplateSection object
     const { currentPage, pageSize } = this.PromptTemplateSection;
@@ -2572,40 +2780,52 @@ ${textContent}
     <div class="${css`column`} AIPRM__relative" style="min-width: 0">
 
 
-      <div class="lg:AIPRM__absolute AIPRM__top-0 AIPRM__right-0 AIPRM__text-right">
-        <div class="AIPRM__mb-2">
-          ${
-            this.Client.AppUser
-              ? /*html*/ `
-                <div class="AIPRM__mb-2">
-                  <div>
-                    Hello, <a target="_blank" href="${AppAccountURL}">
-                      ${sanitizeInput(this.Client.AppUser.Name)}
-                    </a>
-                  </div>
-                        
-                  <div>
-                    <a target="_blank" href="${AppAccountURL}">Your Account</a>
-                  </div>
-                </div>`
-              : /*html*/ `<a href="${AppAccountURL}?action=connect" target="blank">Login</a>`
-          }
-        </div>        
-        
-        ${
-          this.isAdmin()
-            ? /*html*/ `
-              <label class="AIPRM__relative AIPRM__inline-flex AIPRM__items-center AIPRM__mb-5 AIPRM__cursor-pointer AIPRM__flex-col" title="Admin Mode">
-                <input type="checkbox" value="" class="AIPRM__sr-only AIPRM__peer" id="adminMode" onchange="AIPRM.toggleAdminMode()" ${
-                  this.AdminMode ? ' checked' : ''
-                }>
-                <div class="AIPRM__w-9 AIPRM__h-5 AIPRM__bg-gray-200 peer-focus:AIPRM__outline-none AIPRM__rounded-full AIPRM__peer dark:AIPRM__bg-gray-700 peer-checked:after:AIPRM__translate-x-full peer-checked:after:AIPRM__border-white after:AIPRM__content-[''] after:AIPRM__absolute after:AIPRM__top-[2px] after:AIPRM__left-[2px] after:AIPRM__bg-white after:AIPRM__border-gray-300 after:AIPRM__border after:AIPRM__rounded-full after:AIPRM__h-4 after:AIPRM__w-4 after:AIPRM__transition-all dark:AIPRM__border-gray-600 peer-checked:AIPRM__bg-gray-600"></div>
-                <span class="AIPRM__ml-3 AIPRM__text-sm AIPRM__font-medium AIPRM__text-gray-900 dark:AIPRM__text-gray-300"></span>
-              </label>
-            `
-            : ''
-        }
-      </div>
+      ${
+        inAIPRMSidebar
+          ? /*html*/ `
+          <div class="lg:AIPRM__absolute AIPRM__top-0 AIPRM__right-0 AIPRM__text-right">
+            <a title="Close AIPRM sidebar"
+              class="AIPRM__p-2 AIPRM__cursor-pointer AIPRM__align-middle AIPRM__inline-block AIPRM__rounded-md hover:AIPRM__bg-gray-100 hover:AIPRM__text-gray-700 dark:AIPRM__text-gray-400 dark:hover:AIPRM__bg-gray-700 dark:hover:AIPRM__text-gray-200 disabled:dark:hover:AIPRM__text-gray-400" 
+              onclick="event.stopPropagation(); document.getElementById('AIPRM__sidebar-icon').click()">
+              ${svg('CrossExtraLarge')}
+            </a>
+          </div>`
+          : /* html */ `
+          <div class="lg:AIPRM__absolute AIPRM__top-0 AIPRM__right-0 AIPRM__text-right">
+            <div class="AIPRM__mb-2">
+              ${
+                this.Client.AppUser
+                  ? /*html*/ `
+                    <div class="AIPRM__mb-2">
+                      <div>
+                        Hello, <a target="_blank" href="${AppAccountURL}">
+                          ${sanitizeInput(this.Client.AppUser.Name)}
+                        </a>
+                      </div>
+                            
+                      <div>
+                        <a target="_blank" class="AIPRM__underline" href="" onclick="event.preventDefault(); AIPRM.showAccountModal()">Your AIPRM Account</a>
+                      </div>
+                    </div>`
+                  : /*html*/ `<a href="${AppAccountURL}?action=connect" target="blank">Login</a>`
+              }
+            </div>        
+            
+            ${
+              this.isAdmin()
+                ? /*html*/ `
+                  <label class="AIPRM__relative AIPRM__inline-flex AIPRM__items-center AIPRM__mb-5 AIPRM__cursor-pointer AIPRM__flex-col" title="Admin Mode">
+                    <input type="checkbox" value="" class="AIPRM__sr-only AIPRM__peer" id="adminMode" onchange="AIPRM.toggleAdminMode()" ${
+                      this.AdminMode ? ' checked' : ''
+                    }>
+                    <div class="AIPRM__w-9 AIPRM__h-5 AIPRM__bg-gray-200 peer-focus:AIPRM__outline-none AIPRM__rounded-full AIPRM__peer dark:AIPRM__bg-gray-700 peer-checked:after:AIPRM__translate-x-full peer-checked:after:AIPRM__border-white after:AIPRM__content-[''] after:AIPRM__absolute after:AIPRM__top-[2px] after:AIPRM__left-[2px] after:AIPRM__bg-white after:AIPRM__border-gray-300 after:AIPRM__border after:AIPRM__rounded-full after:AIPRM__h-4 after:AIPRM__w-4 after:AIPRM__transition-all dark:AIPRM__border-gray-600 peer-checked:AIPRM__bg-gray-600"></div>
+                    <span class="AIPRM__ml-3 AIPRM__text-sm AIPRM__font-medium AIPRM__text-gray-900 dark:AIPRM__text-gray-300"></span>
+                  </label>
+                `
+                : ''
+            }
+          </div>`
+      }
 
       ${svg`PromptBubble`}
 
@@ -2784,9 +3004,27 @@ ${textContent}
                     this.PromptSortMode === SortModeNo[sortMode]
                       ? 'selected'
                       : ''
-                  }>${capitalizeWords(sortMode.replace('_', ' '))}</option>`
+                  }>${capitalizeWords(sortMode.replaceAll('_', ' '))}</option>`
                 )
                 .join('')}
+            </select>
+          </div>
+
+          <div>
+            <label for="modelSelect" class="AIPRM__block AIPRM__text-sm AIPRM__font-medium">Model</label>
+        
+            <select id="modelSelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900">
+              <option value="${DefaultPromptModel}" 
+              ${
+                this.PromptModel === DefaultPromptModel ? 'selected' : ''
+              }>Not specific</option>
+
+              ${this.ModelsActive.map(
+                (model) =>
+                  /*html*/ `<option value="${sanitizeInput(model.ID)}" ${
+                    this.PromptModel === model.ID ? 'selected' : ''
+                  }>${sanitizeInput(model.LabelUser)}</option>`
+              ).join('')}
             </select>
           </div>
           
@@ -2808,17 +3046,21 @@ ${textContent}
           currentTemplates.length == 0 &&
           (this.PromptTopic != DefaultPromptTopic ||
             this.PromptActivity != DefaultPromptActivity ||
+            this.PromptModel != DefaultPromptModel ||
             this.PromptSearch != '')
             ? /*html*/ `
               <div class="AIPRM__w-full AIPRM__my-8">
-                No prompts found for your current filter. Please reset your filters to view all prompts.<br>
+                <div class="AIPRM__font-semibold AIPRM__text-xl">No prompts found for your current filter.</div>
+                <div>Please reset your filters to view all prompts.</div>
                 <a class="AIPRM__underline" href="#" title="Reset filters" onclick="event.stopPropagation(); AIPRM.resetFilters();">Click here to reset filters</a>
               </div>
             `
             : ''
         }
 
-        <ul class="${css`ul`} AIPRM__grid AIPRM__grid-cols-1 lg:AIPRM__grid-cols-2 2xl:AIPRM__grid-cols-4">
+        <ul class="${css`ul`} AIPRM__grid AIPRM__grid-cols-1 lg:AIPRM__grid-cols-2 ${
+      !isSidebarView ? '2xl:AIPRM__grid-cols-4' : ''
+    }">
           ${currentTemplates
             .map(
               (template) => /*html*/ `
@@ -3011,6 +3253,48 @@ ${textContent}
                     : ''
                 }
 
+                ${(template.ModelS || [])
+                  .map((modelID) => {
+                    if (template.OwnPrompt) {
+                      const model = this.Models?.find((m) => m.ID === modelID);
+                      if (!model) return '';
+
+                      const modelLabelUser = model?.LabelUser;
+                      const modelLabelAuthor = model?.LabelAuthor;
+                      const modelStatusClass =
+                        model?.StatusNo === ModelStatusNo.ACTIVE
+                          ? 'AIPRM__bg-green-100 AIPRM__text-green-800 dark:AIPRM__bg-green-900 dark:AIPRM__text-green-300'
+                          : 'AIPRM__bg-yellow-100 AIPRM__text-yellow-800 dark:AIPRM__bg-yellow-900 dark:AIPRM__text-yellow-300';
+
+                      return model
+                        ? /*html*/ `
+                      <span class="AIPRM__text-xs AIPRM__font-medium AIPRM__mr-1 AIPRM__px-1.5 AIPRM__py-0.5 AIPRM__rounded ${modelStatusClass}" title="This prompt is optimized for ${sanitizeInput(
+                            modelLabelAuthor
+                          )}${
+                            model?.StatusNo !== ModelStatusNo.ACTIVE
+                              ? ' (Deprecated)'
+                              : ''
+                          }">${sanitizeInput(modelLabelUser)}</span>
+                      `
+                        : '';
+                    } else {
+                      const model = this.Models?.find((m) => m.ID === modelID);
+                      if (!model) return '';
+
+                      const modelLabelUser = model?.LabelUser;
+                      const modelLabelAuthor = model?.LabelAuthor;
+
+                      return model
+                        ? /*html*/ `
+                      <span class="AIPRM__bg-green-100 AIPRM__text-green-800 AIPRM__text-xs AIPRM__font-medium AIPRM__mr-1 AIPRM__px-1.5 AIPRM__py-0.5 AIPRM__rounded dark:AIPRM__bg-green-900 dark:AIPRM__text-green-300" title="This prompt is optimized for ${sanitizeInput(
+                        modelLabelAuthor
+                      )}">${sanitizeInput(modelLabelUser)}</span>
+                      `
+                        : '';
+                    }
+                  })
+                  .join('')}
+
                 ${sanitizeInput(template.Teaser)}
               </p>
 
@@ -3135,6 +3419,10 @@ ${textContent}
       .addEventListener('change', this.changePromptSortBy.bind(this));
 
     wrapper
+      .querySelector('#modelSelect')
+      .addEventListener('change', this.changePromptModel.bind(this));
+
+    wrapper
       .querySelector('#promptSearchInput')
       .addEventListener(
         'input',
@@ -3168,13 +3456,6 @@ ${textContent}
       return '';
     }
 
-    if (
-      list.ListTypeNo === ListTypeNo.TEAM_CUSTOM &&
-      !list.HasAdminAccessForTeamMember(this.Client.UserTeamM)
-    ) {
-      return '';
-    }
-
     return /*html*/ `
         <div class="AIPRM__dropdown">
           <button class="AIPRM__align-middle AIPRM__pl-2">
@@ -3182,12 +3463,19 @@ ${textContent}
           </button>
 
           <ul title="" class="AIPRM__dropdown-menu AIPRM__hidden AIPRM__z-50 AIPRM__border AIPRM__bg-white AIPRM__absolute AIPRM__text-left AIPRM__cursor-pointer AIPRM__rounded-xl AIPRM__border-gray-100 dark:AIPRM__bg-gray-900 dark:AIPRM__border-gray-800 dark:AIPRM__shadow-xs dark:AIPRM__text-gray-100 AIPRM__shadow-xxs AIPRM__py-2">
-            <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation(); AIPRM.editCustomList('${
-              list.ID
-            }')">${svg('Edit')}&nbsp;Rename List</li>
+            ${
+              list.ListTypeNo === ListTypeNo.CUSTOM ||
+              list.HasAdminAccessForTeamMember(this.Client.UserTeamM)
+                ? /* html */ `<li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation(); AIPRM.editCustomList('${
+                    list.ID
+                  }')">${svg('Edit')}&nbsp;Rename List</li>`
+                : ''
+            }
 
             ${
-              this.Client.UserQuota?.hasTeamsFeatureEnabled()
+              this.Client.UserQuota?.hasTeamsFeatureEnabled() &&
+              (list.ListTypeNo === ListTypeNo.CUSTOM ||
+                list.HasAdminAccessForTeamMember(this.Client.UserTeamM))
                 ? /*html*/ `
                 <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation();AIPRM.toggleTeamList('${
                   list.ID
@@ -3202,17 +3490,27 @@ ${textContent}
                 : ''
             }
 
-            <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-red-100 dark:hover:!AIPRM__bg-red-500/50 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation(); AIPRM.deleteCustomList('${
-              list.ID
-            }')">${svg('Trash')}&nbsp;Delete List</li>
+            ${
+              list.ListTypeNo === ListTypeNo.CUSTOM ||
+              list.HasAdminAccessForTeamMember(this.Client.UserTeamM)
+                ? /* html */ `<li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-red-100 dark:hover:!AIPRM__bg-red-500/50 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation(); AIPRM.deleteCustomList('${
+                    list.ID
+                  }')">${svg('Trash')}&nbsp;Delete List</li>`
+                : ''
+            }
 
             ${
               list.ListTypeNo === ListTypeNo.TEAM_CUSTOM
-                ? /* html */ `
+                ? list.HasAdminAccessForTeamMember(this.Client.UserTeamM)
+                  ? /* html */ `
                 <div class="AIPRM__my-1.5 AIPRM__h-px AIPRM__bg-gray-100 dark:AIPRM__bg-white/20" role="none"></div>
                 <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation();window.open('${AppTeamURL}/${
-                    list.ForTeamID
-                  }')">${svg('TeamPrompt')}&nbsp;Manage Team</li>`
+                      list.ForTeamID
+                    }')">${svg('TeamPrompt')}&nbsp;Manage Team</li>`
+                  : /* html */ `
+                <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation();window.open('${AppTeamURL}/${
+                      list.ForTeamID
+                    }')">${svg('TeamPrompt')}&nbsp;View Team</li>`
                 : ''
             }
           </ul>
@@ -3394,6 +3692,9 @@ ${textContent}
     this.PromptSearch = '';
     this.PromptTemplateSection.currentPage = 0;
 
+    this.PromptModel = DefaultPromptModel;
+    localStorage.setItem(lastPromptModelKey, this.PromptModel);
+
     if (topicReset) {
       await this.selectPromptTemplateByIndex(null);
 
@@ -3487,6 +3788,18 @@ ${textContent}
     this.PromptTemplateSection.currentPage = 0;
 
     this.fetchPromptTemplates();
+  },
+
+  // changePromptModel updates the this.PromptModel variable and reloads the templates
+  async changePromptModel(e) {
+    this.PromptModel = e.target.value;
+
+    this.PromptTemplateSection.currentPage = 0;
+
+    // persist the last selected model in local storage
+    localStorage.setItem(lastPromptModelKey, this.PromptModel);
+
+    await this.insertPromptTemplatesSection();
   },
 
   // changePromptSearch updates the this.PromptSearch variable and re-renders the templates
@@ -3942,10 +4255,10 @@ ${textContent}
 
   // Export the current chat log to a file
   exportCurrentChat() {
+    const selectorConfig = this.Config.getSelectorConfig();
+
     const blocks = [
-      ...document.querySelector(
-        this.Config.getSelectorConfig().ChatLogContainer
-      ).children,
+      ...document.querySelector(selectorConfig.ChatLogContainer).children,
     ];
 
     let markdown = blocks.map((block) => {
@@ -3955,8 +4268,8 @@ ${textContent}
         return '';
       }
 
-      // probably a user's, so..
-      if (wrapper.children.length === 0) {
+      // wrapper doesn't match conversation response selector - it's user's message
+      if (!wrapper.querySelector(selectorConfig.ConversationResponse)) {
         return '**User:**\n' + wrapper.innerText;
       }
 
@@ -3978,7 +4291,7 @@ ${textContent}
                     ?.classList[2]?.split('-')[1] || '';
 
                 return `\`\`\`${language}\n${node.innerText
-                  .replace(/^Copy code/g, '')
+                  .replace(/^.*\n?Copy code/g, '')
                   .trim()}\n\`\`\``;
               default:
                 return `${node.innerHTML}`;
@@ -4092,6 +4405,8 @@ ${textContent}
     form.elements['Usages'].value = prompt.Usages;
     form.elements['Votes'].value = prompt.Votes;
 
+    this.prepareModelsMultiselect(prompt, form);
+
     // Show the "Forked from Prompt Template" link if applicable
     if (prompt.ForkedFromPromptID) {
       form.elements['ForkedFromPromptID'].value = prompt.ForkedFromPromptID;
@@ -4116,6 +4431,22 @@ ${textContent}
       this.hideSavePromptModal();
       this.clonePrompt(idx);
     };
+  },
+
+  prepareModelsMultiselect(prompt, form) {
+    const optionsModelS = Array.from(form.elements['ModelS'].options);
+    optionsModelS?.forEach(function (o) {
+      if (prompt.ModelS?.find((c) => c == o.value)) {
+        o.selected = true;
+      } else if (
+        o.attributes['AIPRMModelStatusNo']?.value != ModelStatusNo.ACTIVE
+      ) {
+        o.remove();
+      }
+    });
+
+    // initialize multi-select
+    MultiselectDropdown(modelMultiselectOptions);
   },
 
   // Delete a prompt template
@@ -4575,6 +4906,12 @@ ${textContent}
     );
     var data = [[]];
     var matches;
+
+    // No need to continue if no strData provided
+    if (!strData) {
+      return data;
+    }
+
     while ((matches = pattern.exec(strData))) {
       var delimiter = matches[1];
       if (delimiter.length && delimiter !== strDelimiter) {
@@ -4742,6 +5079,36 @@ ${textContent}
                     </div>
                   </div>
 
+                  <div>
+                    <label>Made for</label>
+                    <div class="AIPRM__w-full AIPRM__border-gray-500 AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3 AIPRM__border">
+                      ${
+                        prompt.ModelS?.length > 0
+                          ? prompt.ModelS?.map((modelID) => {
+                              const model = this.Models?.find(
+                                (m) => m.ID === modelID
+                              );
+                              const modelLabel = model?.LabelAuthor;
+
+                              return modelLabel
+                                ? /*html*/ `<span class="AIPRM__whitespace-nowrap ${
+                                    model?.StatusNo !== ModelStatusNo.ACTIVE
+                                      ? 'AIPRM__line-through'
+                                      : ''
+                                  }" title="This prompt is optimized for ${sanitizeInput(
+                                    modelLabel
+                                  )}${
+                                    model?.StatusNo !== ModelStatusNo.ACTIVE
+                                      ? ' (deprecated)'
+                                      : ''
+                                  }">${sanitizeInput(modelLabel)}</span>`
+                                : '';
+                            }).join(', ')
+                          : /*html*/ `<span title="This prompt is not optimized for specific model">Not specific</span>`
+                      }
+                    </div>
+                  </div>
+
                   <div class="AIPRM__block AIPRM__mt-4">
                     <div class="AIPRM__flex AIPRM__justify-between AIPRM__mt-4">
                       <div class="AIPRM__mr-4 AIPRM__w-full"><label>Author Name</label>
@@ -4843,6 +5210,8 @@ ${textContent}
     form.elements['Title'].value = promptOriginal.Title;
     form.elements['Community'].value = promptOriginal.Community;
 
+    this.prepareModelsMultiselect(promptOriginal, form);
+
     // Update the "Forked from Prompt Template" link
     this.updateForkedFromPromptLink(promptOriginal.ID);
 
@@ -4882,6 +5251,8 @@ ${textContent}
     form.elements['Community'].value = promptOriginal.Community;
     form.elements['AuthorName'].value = promptOriginal.AuthorName;
     form.elements['AuthorURL'].value = promptOriginal.AuthorURL;
+
+    this.prepareModelsMultiselect(promptOriginal, form);
 
     // Cloning forked prompt template results in a forked prompt too
     if (promptOriginal.ForkedFromPromptID) {
@@ -5203,6 +5574,7 @@ ${textContent}
                     ${lists
                       .map((list) => {
                         if (
+                          list.ListTypeNo === ListTypeNo.AIPRM_VERIFIED ||
                           list.ListTypeNo === ListTypeNo.CUSTOM ||
                           list.HasWriteAccessForTeamMember(
                             this.Client.UserTeamM
@@ -5617,6 +5989,184 @@ ${textContent}
     const prompt = (await this.getCurrentPromptTemplates())[idx];
 
     return await list.has(prompt);
+  },
+
+  // Show AIPRM Account modal (connect/disconnect AIPRM account, current AIPRM Plan level and OpenAI account)
+  showAccountModal() {
+    let accountModal = document.getElementById('AIPRM__accountModal');
+
+    // if modal does not exist, create it, add event listener on submit and append it to body
+    if (!accountModal) {
+      accountModal = document.createElement('div');
+      accountModal.id = 'AIPRM__accountModal';
+
+      accountModal.addEventListener(
+        'submit',
+        this.savePromptAsTemplate.bind(this)
+      );
+
+      document.body.appendChild(accountModal);
+    }
+
+    accountModal.innerHTML = /*html*/ `
+      <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
+        <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+        </div>
+
+        <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
+          <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
+
+            <div
+              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+              role="dialog" aria-modal="true" aria-labelledby="modal-headline">
+
+                <div class="AIPRM__border-b dark:AIPRM__border-gray-700 AIPRM__px-6 AIPRM__flex AIPRM__w-full AIPRM__flex-row AIPRM__items-center AIPRM__justify-between">
+                  <h2 class="AIPRM__py-3 AIPRM__text-lg AIPRM__font-medium AIPRM__leading-6 AIPRM__text-gray-900 dark:AIPRM__text-gray-200">
+                    Your AIPRM Account
+                  </h2>
+                  <button class="AIPRM__text-gray-700 AIPRM__opacity-50 AIPRM__transition hover:AIPRM__opacity-75 dark:AIPRM__text-white AIPRM__pl-2"
+                    onclick="AIPRM.hideModal('AIPRM__accountModal')">
+                    ${svg('CrossLarge')}
+                  </button>
+                </div>                
+          
+                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__p-4 AIPRM__px-6 AIPRM__overflow-y-auto">
+
+                  <dl class="AIPRM__text-sm">
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
+                      <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">AIPRM Account</dt>
+                      <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
+                        <div style="overflow-wrap: anywhere">
+                          ${
+                            this.Client.User.IsLinked
+                              ? `${sanitizeInput(this.Client.AppUser.Email)}`
+                              : 'Not Connected with AIPRM Account'
+                          }
+                        </div>
+                        ${
+                          this.Client.User.IsLinked
+                            ? /*html*/ `
+                              <button class="AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-red-500 hover:AIPRM__border-red-700 AIPRM__text-red-500 hover:AIPRM__text-red-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-red-400 dark:hover:AIPRM__border-red-400" onclick="AIPRM.disconnectAccount()">
+                                Disconnect
+                              </button>
+                            `
+                            : /*html*/ `
+                              <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}?action=connect" target="_blank">
+                                Connect
+                              </a>
+                            `
+                        }
+                      </dd>
+                    </div>
+
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
+                      <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">AIPRM Plan Level</dt>
+                      <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
+                        <div>
+                          ${this.Client.UserQuota.getMaxPlanLevelLabel()}
+                        </div>
+
+                        <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppPricingURL}" target="_blank">
+                          Upgrade
+                        </a>
+                      </dd>
+                    </div>
+
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row">
+                      <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">OpenAI Account</dt>
+                      <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
+                        <div>
+                           ${sanitizeInput(
+                             window.__NEXT_DATA__?.props?.pageProps?.user
+                               ?.email || 'Unknown'
+                           )}
+                        </div>
+                      </dd>
+                    </div>
+                  </dl>
+
+                </div>
+              </div>
+          </div>
+        </div>
+        
+      </div>
+    `;
+
+    accountModal.style = 'display: block;';
+
+    // add event listener to close the modal on ESC
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        this.hideModal('AIPRM__accountModal');
+      }
+    });
+  },
+
+  // Disconnect the user's AIPRM account
+  async disconnectAccount() {
+    if (!confirm('Are you sure you want to disconnect your AIPRM account?')) {
+      return;
+    }
+
+    // unlink the AIPRM account and user
+    try {
+      await this.Client.unlinkUser();
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not disconnect your AIPRM account, please try again later.',
+        false
+      );
+
+      return;
+    }
+
+    try {
+      // refresh AIPRM user profile and quota
+      await this.Client.checkUserStatus();
+
+      // show notification if connection status is not updated, yet
+      if (this.Client.User.IsLinked) {
+        this.showNotification(
+          NotificationSeverity.INFO,
+          'Disconnecting your AIPRM account, please wait...',
+          false
+        );
+      }
+
+      // wait for CheckUserStatus to update the connection status, quotas and user profile
+      while (this.Client.User.IsLinked) {
+        // poll checkUserStatus every 5 seconds
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+
+        await this.Client.checkUserStatus();
+      }
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not get user status, please try again later.',
+        false
+      );
+
+      return;
+    }
+
+    // hide the modal
+    this.hideModal('AIPRM__accountModal');
+
+    // show notification
+    this.showNotification(
+      NotificationSeverity.SUCCESS,
+      'Your AIPRM account has been disconnected successfully.',
+      false
+    );
+
+    // reset App User
+    this.Client.AppUser = null;
+
+    // refresh the prompt templates section to show link to login
+    await this.insertPromptTemplatesSection();
   },
 };
 

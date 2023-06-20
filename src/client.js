@@ -71,6 +71,7 @@ import { Reaction } from './rxn.js';
  * @property {() => Tokens} getTokens
  * @property {(url: string, options: RequestInit) => Promise<Response>} fetchWithToken
  * @property {(refreshToken: string) => Promise<void>} refreshToken
+ * @property {() => Promise<void>} unlinkUser
  * @property {() => Promise<boolean>} linkUser
  * @property {(hidden?: boolean) => Promise<List[]>} getLists
  * @property {(ListID: List['ID']) => Promise<List>} getListDetails
@@ -198,7 +199,6 @@ const AIPRMClient = {
           ) {
             this.UserQuota = new UserQuota(this.User, res.Quota);
           }
-
 
           if (
             this.UserQuota?.hasTeamsFeatureEnabled() &&
@@ -360,7 +360,7 @@ const AIPRMClient = {
    */
   getPrompts(
     Community,
-    SortModeNo = SortModeNo.TOP_VOTES,
+    SortModeNo = SortModeNo.TOP_USAGE,
     Limit = 10,
     Offset = 0
   ) {
@@ -517,6 +517,23 @@ const AIPRMClient = {
           this.storeTokens(tokens);
         })
     );
+  },
+
+  // unlink AIPRM user and account from OpenAI user
+  unlinkUser() {
+    if (!this.User.IsLinked) {
+      return;
+    }
+
+    return fetch(`${APIEndpoint}/Users/Disconnect`, {
+      method: 'POST',
+      body: JSON.stringify({
+        User: this.User,
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }).then(this.handleResponse);
   },
 
   // link OpenAI user to AIPRM user and account
