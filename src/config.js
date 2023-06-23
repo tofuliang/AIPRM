@@ -60,7 +60,7 @@ const TargetLanguagePlaceholder = '[TARGETLANGUAGE]';
 const CrawledTextPlaceholder = '[CRAWLEDTEXT]';
 const CrawledSourcePlaceholder = '[CRAWLEDSOURCE]';
 const VariablePlaceholder = '[VARIABLE{idx}]';
-const VariableDefinition = /\[VARIABLE([1-3]):(.+?)(:.*?)?(:.*?)?\]/g;
+const VariableDefinition = /\[VARIABLE([1-6]):(.+?)(:.*?)?(:.*?)?\]/g;
 const LanguageFeedURL = 'https://api.aiprm.com/csv/languages-20230119.csv?v=';
 const TopicFeedURL = 'https://api.aiprm.com/csv/topics-20230123.csv?v=';
 const ActivityFeedURL = 'https://api.aiprm.com/csv/activities-20230124.csv?v=';

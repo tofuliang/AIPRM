@@ -1503,6 +1503,16 @@ ${textContent}
       return;
     }
 
+    // Display sidebar icon only in new and existing conversations
+    const selectorConfig = this.Config.getSelectorConfig();
+
+    if (
+      !document.querySelector(selectorConfig.ConversationResponse) &&
+      !document.querySelector(selectorConfig.FirstPrompt)
+    ) {
+      return;
+    }
+
     sidebarIcon = document.createElement('div');
     sidebarIcon.id = 'AIPRM__sidebar-icon';
 
@@ -1527,7 +1537,7 @@ ${textContent}
       sidebar.classList.toggle('AIPRM__translate-x-full');
 
       // add prompt templates section to sidebar
-      this.insertPromptTemplatesSection(true);
+      this.insertPromptTemplatesSection();
     });
 
     // Prepare sidebar element with sidebar icon and prompt templates section
@@ -1597,7 +1607,7 @@ ${textContent}
     saveButton.className =
       'save-prompt-button AIPRM__p-1 AIPRM__rounded-md hover:AIPRM__bg-gray-100 hover:AIPRM__text-gray-700 dark:AIPRM__text-gray-400 dark:hover:AIPRM__bg-gray-700 dark:hover:AIPRM__text-gray-200 disabled:dark:hover:AIPRM__text-gray-400 md:AIPRM__invisible md:group-hover:AIPRM__visible md:group-hover:visible';
     saveButton.title = 'Save prompt as template';
-    saveButton.addEventListener('click', this.showSavePromptModal.bind(this));
+    saveButton.addEventListener('click', this.createNewPrompt.bind(this));
     saveButton.innerHTML = svg('Save');
 
     // add HTML before children in button.parentElement
@@ -2238,6 +2248,13 @@ ${textContent}
     createReportPromptModal(prompt, this.reportPrompt.bind(this));
   },
 
+  async createNewPrompt(e) {
+    await this.showSavePromptModal(e);
+
+    const form = document.getElementById('savePromptForm');
+    this.prepareModelsMultiselect({}, form);
+  },
+
   /**
    * Show modal to save prompt as template
    *
@@ -2450,10 +2467,10 @@ ${textContent}
         form.elements['PromptTypeNo'].value = PromptTypeNo.PRIVATE;
       } else {
         const selectedList = this.Lists.withID(this.PromptTemplatesList);
-        if (selectedList.ListTypeNo === ListTypeNo.CUSTOM) {
-          form.elements['PromptTypeNo'].value = PromptTypeNo.PRIVATE;
-        } else {
+        if (selectedList.ListTypeNo === ListTypeNo.TEAM_CUSTOM) {
           form.elements['PromptTypeNo'].value = PromptTypeNo.TEAM;
+        } else {
+          form.elements['PromptTypeNo'].value = PromptTypeNo.PRIVATE;
         }
       }
     }
@@ -2636,7 +2653,7 @@ ${textContent}
   },
 
   // This function inserts a section containing a list of prompt templates into the chat interface
-  async insertPromptTemplatesSection(inAIPRMSidebar = false) {
+  async insertPromptTemplatesSection() {
     // If there are no topics or activities do not insert the section, yet
     if (!this.Topics.length || !this.Activities.length) {
       console.error(
@@ -2781,7 +2798,7 @@ ${textContent}
 
 
       ${
-        inAIPRMSidebar
+        isSidebarView
           ? /*html*/ `
           <div class="lg:AIPRM__absolute AIPRM__top-0 AIPRM__right-0 AIPRM__text-right">
             <a title="Close AIPRM sidebar"
@@ -2949,12 +2966,20 @@ ${textContent}
                 ? 'AIPRM__bg-gray-50 dark:AIPRM__bg-white/5'
                 : ''
             } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__w-full">
-              ${svg('CrossLarge')} &nbsp; Hidden
+              ${svg('EyeSlash')} &nbsp; Hidden
+            </a>
+          </li>
+
+          <li class="AIPRM__flex-1">
+            <a href="#" id="addNewListTab" title="Create New List" 
+            onclick="AIPRM.showListCreateModal()" 
+            class="AIPRM__rounded AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__m-2 AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+            ${svg('Plus')} &nbsp; Add List
             </a>
           </li>
         </ul>
     
-        <div class="AIPRM__grid AIPRM__grid-cols-2 sm:AIPRM__flex AIPRM__flex-row AIPRM__gap-3 AIPRM__items-end AIPRM__justify-between AIPRM__w-full md:last:AIPRM__mb-6 AIPRM__pt-2 AIPRM__stretch AIPRM__text-left AIPRM__text-sm">
+        <div class="AIPRM__grid AIPRM__grid-cols-2 lg:AIPRM__flex AIPRM__flex-row AIPRM__gap-3 AIPRM__items-end AIPRM__justify-between AIPRM__w-full md:last:AIPRM__mb-6 AIPRM__pt-2 AIPRM__stretch AIPRM__text-left AIPRM__text-sm">
           <div>
             <label for="topicSelect" class="AIPRM__block AIPRM__text-sm AIPRM__font-medium">Topic</label>
         
@@ -3027,12 +3052,25 @@ ${textContent}
               ).join('')}
             </select>
           </div>
-          
-          <div>
-            <input id="promptSearchInput" type="search" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 md:AIPRM__w-[260px]" placeholder="Search" 
+
+          <div class="AIPRM__whitespace-nowrap AIPRM__flex">
+            <button title="Create New Prompt" 
+              onclick="event.preventDefault(); AIPRM.createNewPrompt()" 
+              class="AIPRM__rounded AIPRM__justify-center AIPRM__items-center AIPRM__hidden lg:AIPRM__inline-block AIPRM__mr-1 AIPRM__p-2 AIPRM__px-2.5 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+              ${svg('Plus')}
+            </button>
+            <input id="promptSearchInput" type="search" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__inline-block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 lg:AIPRM__w-[260px]" placeholder="Search" 
             value="${sanitizeInput(
               this.PromptSearch
             )}" onfocus="this.value = this.value">
+          </div>
+
+          <div class="lg:AIPRM__hidden">
+            <button title="Create New Prompt" 
+              onclick="event.preventDefault(); AIPRM.createNewPrompt()" 
+              class="AIPRM__rounded AIPRM__w-full AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+              ${svg('Plus')} &nbsp; Add Prompt
+            </button>
           </div>
         </div>
 
@@ -3278,7 +3316,9 @@ ${textContent}
                       `
                         : '';
                     } else {
-                      const model = this.Models?.find((m) => m.ID === modelID);
+                      const model = this.ModelsActive?.find(
+                        (m) => m.ID === modelID
+                      );
                       if (!model) return '';
 
                       const modelLabelUser = model?.LabelUser;
@@ -3363,7 +3403,7 @@ ${textContent}
             (selectedList.ListTypeNo === ListTypeNo.TEAM_CUSTOM &&
               this.Client.UserTeamM?.get(selectedList.ForTeamID)
                 ?.MemberRoleNo === MemberRoleNo.OWNER)
-              ? /*html*/ `<button onclick="AIPRM.showSavePromptModal()" class="${css`card`} AIPRM__relative AIPRM__group AIPRM__justify-center AIPRM__items-center">
+              ? /*html*/ `<button onclick="AIPRM.createNewPrompt()" class="${css`card`} AIPRM__relative AIPRM__group AIPRM__justify-center AIPRM__items-center">
               <div class="AIPRM__flex AIPRM__items-center AIPRM__gap-3">
                 ${svg('Plus')}
                 ${
@@ -5103,7 +5143,9 @@ ${textContent}
                                       : ''
                                   }">${sanitizeInput(modelLabel)}</span>`
                                 : '';
-                            }).join(', ')
+                            })
+                              .filter((m) => m !== '')
+                              .join(', ')
                           : /*html*/ `<span title="This prompt is not optimized for specific model">Not specific</span>`
                       }
                     </div>
@@ -5869,6 +5911,202 @@ ${textContent}
   },
 
   /**
+   * Show create list modal
+   */
+  showListCreateModal() {
+    let listCreateModal = document.getElementById('listCreateModal');
+
+    // if modal does not exist, create it, add event listener on submit and append it to body
+    if (!listCreateModal) {
+      listCreateModal = document.createElement('div');
+      listCreateModal.id = 'listCreateModal';
+
+      listCreateModal.addEventListener(
+        'submit',
+        this.handleListCreateModalSubmit.bind(this)
+      );
+
+      document.body.appendChild(listCreateModal);
+    }
+
+    listCreateModal.innerHTML = /*html*/ `
+      <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
+        <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+        </div>
+
+        <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
+          <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
+            <form>
+              <div
+                class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+                role="dialog" aria-modal="true" aria-labelledby="modal-headline">
+
+                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__w-96">
+
+                  <h3 class="${css`h3`} AIPRM__my-4">Create a new list</h3>
+
+                    <label class="AIPRM__block">List Name</label>
+                    <input type="text" name="listName" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
+
+                    ${
+                      this.Client.UserQuota?.hasTeamsFeatureEnabled()
+                        ? /*html*/ `
+                        <label class="AIPRM__text-sm AIPRM__flex AIPRM__items-center" id="savePromptForm-public-checkbox">
+                          <input id="createNewListShareWithTeam" name="createNewListShareWithTeam" 
+                            type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
+                            onchange="AIPRM.toggleCreateNewListSelectTeam();"> 
+                          Share with Team
+                        </label>
+
+                        <div id="createNewListSelectTeam" class="AIPRM__hidden">
+                          <select id="createNewListSelectTeam" name="createNewListSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                            ${
+                              this.Client.OwnTeamS?.length > 0
+                                ? this.Client.OwnTeamS.map(
+                                    (team) =>
+                                      /*html*/ `<option value="${sanitizeInput(
+                                        team.TeamID
+                                      )}">${sanitizeInput(
+                                        team.TeamName
+                                      )}</option>`
+                                  ).join('')
+                                : /*html*/ `<option value="NEW">My First Team</option>`
+                            }
+                          </select>
+
+                          ${
+                            this.Client.OwnTeamS?.length > 0
+                              ? /*html*/ `<a href="${AppTeamURL}" target="blank" class="AIPRM__text-sm AIPRM__text-gray-500 AIPRM__underline">Manage My Teams</a>`
+                              : ''
+                          }
+                        </div>
+                        `
+                        : ''
+                    }
+                </div>
+
+                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+                  <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
+                          onclick="AIPRM.hideModal('listCreateModal')"> Cancel
+                  </button>
+                  <button type="submit" class="AIPRM__bg-green-600 hover:AIPRM__bg-green-700 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white">Create list</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    `;
+
+    listCreateModal.style = 'display: block;';
+
+    // add event listener to close the modal on ESC
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideModal('listCreateModal');
+      }
+    });
+  },
+
+  // Handle submit of list create modal form and create a new list
+  async handleListCreateModalSubmit(e) {
+    e.preventDefault();
+
+    const formData = new FormData(e.target);
+
+    const listName = formData.get('listName')?.trim();
+
+    // no list name entered
+    if (!listName) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Please specify list name.'
+      );
+      return;
+    }
+
+    const shareWithTeamCheckbox = document.querySelector(
+      '#createNewListShareWithTeam'
+    );
+    const shareWithTeam =
+      shareWithTeamCheckbox && shareWithTeamCheckbox.checked;
+    const forTeamID = formData.get('createNewListSelectTeam');
+
+    if (!shareWithTeam) {
+      if (!this.Client.UserQuota.canUseCustomList()) {
+        return;
+      }
+    }
+
+    let list;
+
+    try {
+      if (shareWithTeam) {
+        if (!forTeamID) {
+          this.showNotification(
+            NotificationSeverity.ERROR,
+            'Please select a team.'
+          );
+          return;
+        }
+
+        list = await this.Lists.create(
+          this.Client,
+          ListTypeNo.TEAM_CUSTOM,
+          listName,
+          {},
+          forTeamID
+        );
+
+        // init list with empty Items
+        list.list.Items = [];
+      }
+      // new list - create it and add prompt to it
+      else {
+        if (!this.Client.UserQuota.canCreateCustomList(this.Lists)) {
+          return;
+        }
+
+        list = await this.Lists.create(
+          this.Client,
+          ListTypeNo.CUSTOM,
+          listName,
+          {}
+        );
+
+        // init list with empty Items
+        list.list.Items = [];
+      }
+    } catch (error) {
+      if (
+        error instanceof Reaction &&
+        error.ReactionNo === ReactionNo.RXN_AIPRM_QUOTA_EXCEEDED
+      ) {
+        this.Client.UserQuota.listQuotaExceeded();
+      } else {
+        this.showNotification(
+          NotificationSeverity.ERROR,
+          `Could not create list. ${
+            error instanceof Reaction ? error.message : ''
+          }`
+        );
+      }
+
+      return;
+    }
+
+    this.showNotification(
+      NotificationSeverity.SUCCESS,
+      `Created "${sanitizeInput(list.Comment)}" prompts list.`
+    );
+
+    this.hideModal('listCreateModal');
+
+    this.insertPromptTemplatesSection();
+  },
+
+  /**
    * Edit a custom list's name, then re-insert the prompt templates section
    *
    * @param {List['ID]} listID
@@ -5999,11 +6237,6 @@ ${textContent}
     if (!accountModal) {
       accountModal = document.createElement('div');
       accountModal.id = 'AIPRM__accountModal';
-
-      accountModal.addEventListener(
-        'submit',
-        this.savePromptAsTemplate.bind(this)
-      );
 
       document.body.appendChild(accountModal);
     }

@@ -543,6 +543,10 @@
   margin: 0px;
 }
 
+.AIPRM__m-2 {
+  margin: 0.5rem;
+}
+
 .AIPRM__m-auto {
   margin: auto;
 }
@@ -1033,6 +1037,11 @@
 .AIPRM__px-2 {
   padding-left: 0.5rem;
   padding-right: 0.5rem;
+}
+
+.AIPRM__px-2\.5 {
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
 }
 
 .AIPRM__px-3 {
@@ -1880,10 +1889,6 @@ html[class*="dark"] .disabled\:dark\:hover\:AIPRM__text-gray-400:hover:disabled 
     margin-bottom: 2rem;
   }
 
-  .sm\:AIPRM__flex {
-    display: flex;
-  }
-
   .sm\:AIPRM__w-1\/2 {
     width: 50%;
   }
@@ -1934,10 +1939,6 @@ html[class*="dark"] .disabled\:dark\:hover\:AIPRM__text-gray-400:hover:disabled 
     width: 91.666667%;
   }
 
-  .md\:AIPRM__w-\[260px\] {
-    width: 260px;
-  }
-
   .md\:last\:AIPRM__mb-6:last-child {
     margin-bottom: 1.5rem;
   }
@@ -1956,8 +1957,24 @@ html[class*="dark"] .disabled\:dark\:hover\:AIPRM__text-gray-400:hover:disabled 
     position: absolute;
   }
 
+  .lg\:AIPRM__inline-block {
+    display: inline-block;
+  }
+
+  .lg\:AIPRM__flex {
+    display: flex;
+  }
+
+  .lg\:AIPRM__hidden {
+    display: none;
+  }
+
   .lg\:AIPRM__w-3\/4 {
     width: 75%;
+  }
+
+  .lg\:AIPRM__w-\[260px\] {
+    width: 260px;
   }
 
   .lg\:AIPRM__max-w-3xl {
