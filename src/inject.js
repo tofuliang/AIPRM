@@ -127,8 +127,11 @@ const lastPageSizeKey = 'lastPageSize';
 const lastPromptTemplateTypeKey = 'lastPromptTemplateType';
 const lastListIDKey = 'lastListID';
 
+const myProfileMessageKey = 'myProfileMessageAIPRM';
+
 const queryParamPromptID = 'AIPRM_PromptID';
 const queryParamVariable = 'AIPRM_VARIABLE';
+const queryParamPrompt = 'AIPRM_Prompt';
 
 // The number of prompts per page in the prompt templates section
 const pageSizeOptions = [4, 8, 12, 16, 20];
@@ -287,8 +290,19 @@ window.AIPRM = {
   /** @type {import('./client.js').Message[]} */
   Messages: [],
 
+  // Include my profile message in the submitted prompt
+  IncludeMyProfileMessage: false,
+
+  // Prefill prompt via event
+  PrefillPrompt: null,
+
   async init() {
     console.log('AIPRM init');
+
+    // listen for AIPRM.prompt event from content script
+    document.addEventListener('AIPRM.prompt', (event) => {
+      this.PrefillPrompt = event.detail.prompt;
+    });
 
     // Bind event handler for arrow keys
     this.boundHandleArrowKey = this.handleArrowKey.bind(this);
@@ -346,12 +360,13 @@ window.AIPRM = {
     ]);
 
     this.insertLanguageToneWritingStyleContinueActions();
-
+    this.insertIncludeMyProfileCheckbox();
     this.insertVariablesInputWrapper();
 
     this.setupSidebar();
 
     this.fetchPromptFromDeepLink();
+    this.prefillPromptInput();
 
     // on state change (e.g. back button) fetch the prompt from the deep link
     window.addEventListener('popstate', () => {
@@ -364,6 +379,57 @@ window.AIPRM = {
     });
 
     this.addWatermark();
+
+    this.setupFavoritePromptsContextMenu();
+  },
+
+  // add prompts from "Favorites" Prompts to context menu
+  async setupFavoritePromptsContextMenu() {
+    // sync needed also with no prompt IDs to remove favorites from context menu
+    const favoritePromptIDs =
+      (await this.Lists.getFavorites()?.getPromptIDS()) || [];
+
+    // find favorite prompts
+    const favoritePrompts =
+      favoritePromptIDs.length === 0
+        ? []
+        : [
+            ...this.PromptTemplates,
+            ...this.OwnPrompts,
+            ...this.TeamPrompts,
+          ].filter((prompt) => favoritePromptIDs.includes(prompt.ID));
+
+    // unique favorite prompts by ID
+    let uniqueFavoritePrompts =
+      favoritePrompts.length === 0
+        ? []
+        : favoritePrompts.reduce((acc, prompt) => {
+            if (!acc.find((p) => p.ID === prompt.ID)) {
+              acc.push(prompt);
+            }
+
+            return acc;
+          }, []);
+
+    // add _LIVE suffix to ID for context menu actions if template supports live crawling
+    uniqueFavoritePrompts = uniqueFavoritePrompts.map((prompt) => ({
+      ...prompt,
+      ID: this.templateRequiresLiveCrawling(prompt)
+        ? `${prompt.ID}_LIVE`
+        : prompt.ID,
+    }));
+
+    // sort by Title
+    uniqueFavoritePrompts.sort((a, b) => a.Title.localeCompare(b.Title));
+
+    // send favorite prompts to content script
+    window.postMessage({
+      from: 'AIPRM',
+      data: {
+        type: 'AIPRM.favoritePrompts',
+        favoritePrompts: uniqueFavoritePrompts,
+      },
+    });
   },
 
   // fetch config from remote JSON file
@@ -1290,14 +1356,50 @@ ${textContent}
       // If the request is not for the chat backend API, just use the original fetch function
       if (t[0] !== EndpointConversation) return this.fetch(...t);
 
-      // If no prompt template, tone, writing style or target language has been selected, use the original fetch function
+      // Get the profile message
+      const profileMessage = this.getProfileMessage();
+
+      // If no prompt template, tone, writing style or target language has been selected,
+      // use only the profile message or the original fetch function if the profile message is not needed
       if (
         !this.SelectedPromptTemplate &&
         !this.Tone &&
         !this.WritingStyle &&
         !this.TargetLanguage
       ) {
-        return this.fetch(...t);
+        // Use profile message if needed - otherwise, use the original fetch function
+        if (!this.IncludeMyProfileMessage || !profileMessage) {
+          // Reset the IncludeMyProfileMessage
+          this.resetIncludeMyProfileMessage();
+
+          return this.fetch(...t);
+        }
+
+        try {
+          // Get the options object for the request, which includes the request body
+          const options = t[1];
+
+          // Parse the request body from JSON
+          const body = JSON.parse(options.body);
+
+          // Add the profile message to the request body
+          body.messages[0].content.parts[0] += `\n\n${profileMessage}`;
+
+          // Reset the IncludeMyProfileMessage
+          this.resetIncludeMyProfileMessage();
+
+          // Stringify the modified request body and update the options object
+          options.body = JSON.stringify(body);
+
+          // Use the modified fetch function to make the request
+          return this.fetch(t[0], options);
+        } catch (err) {
+          console.error('Error modifying request body', err);
+
+          // If there was an error parsing the request body or modifying the request,
+          // just use the original fetch function
+          return this.fetch(...t);
+        }
       }
 
       // Get the selected prompt template
@@ -1410,6 +1512,14 @@ ${textContent}
           )}.`;
         }
 
+        // Inject profile message into the request body if available
+        if (profileMessage && this.IncludeMyProfileMessage) {
+          body.messages[0].content.parts[0] += `\n\n${profileMessage}`;
+        }
+
+        // Reset the IncludeMyProfileMessage
+        this.resetIncludeMyProfileMessage();
+
         // Clear the selected prompt template
         await this.selectPromptTemplateByIndex(null);
 
@@ -1474,6 +1584,7 @@ ${textContent}
       if (button) button.style = 'pointer-events: none;opacity: 0.5';
 
       this.insertLanguageToneWritingStyleContinueActions();
+      this.insertIncludeMyProfileCheckbox();
     }
 
     // Enable "Export Button" when a new chat started.
@@ -1483,6 +1594,7 @@ ${textContent}
       if (button) button.style = '';
 
       this.insertLanguageToneWritingStyleContinueActions();
+      this.insertIncludeMyProfileCheckbox();
     }
 
     // Add "Save prompt as template" button, if new prompt was added
@@ -3080,21 +3192,11 @@ ${textContent}
             : ''
         }
 
-        ${
-          currentTemplates.length == 0 &&
-          (this.PromptTopic != DefaultPromptTopic ||
-            this.PromptActivity != DefaultPromptActivity ||
-            this.PromptModel != DefaultPromptModel ||
-            this.PromptSearch != '')
-            ? /*html*/ `
-              <div class="AIPRM__w-full AIPRM__my-8">
-                <div class="AIPRM__font-semibold AIPRM__text-xl">No prompts found for your current filter.</div>
-                <div>Please reset your filters to view all prompts.</div>
-                <a class="AIPRM__underline" href="#" title="Reset filters" onclick="event.stopPropagation(); AIPRM.resetFilters();">Click here to reset filters</a>
-              </div>
-            `
-            : ''
-        }
+        ${this.handleNoPromptsInViewMessage(
+          currentTemplates,
+          isFavoritesListView,
+          selectedList
+        )}
 
         <ul class="${css`ul`} AIPRM__grid AIPRM__grid-cols-1 lg:AIPRM__grid-cols-2 ${
       !isSidebarView ? '2xl:AIPRM__grid-cols-4' : ''
@@ -3484,6 +3586,86 @@ ${textContent}
 
       // Add event listener for the pagination buttons
       document.addEventListener('keydown', this.boundHandleArrowKey);
+    }
+  },
+
+  /**
+   * @param {Prompt[]} currentTemplates
+   * @param {boolean} isFavoritesListView
+   * @param {List} selectedList
+   */
+  handleNoPromptsInViewMessage(
+    currentTemplates,
+    isFavoritesListView,
+    selectedList
+  ) {
+    // there are prompts in the current view
+    if (currentTemplates.length > 0) {
+      return '';
+    }
+
+    if (
+      this.PromptTopic != DefaultPromptTopic ||
+      this.PromptActivity != DefaultPromptActivity ||
+      this.PromptModel != DefaultPromptModel ||
+      this.PromptSearch != ''
+    ) {
+      return /*html*/ `
+        <div class="AIPRM__w-full AIPRM__my-8">
+          <div class="AIPRM__font-semibold AIPRM__text-xl">No prompts found for your current filter.</div>
+          <div>Please reset your filters to view all prompts.</div>
+          <a class="AIPRM__underline" href="#" title="Reset filters" onclick="event.stopPropagation(); AIPRM.resetFilters();">Click here to reset filters</a>
+        </div>
+      `;
+    }
+
+    if (this.PromptTemplatesType === PromptTemplatesType.OWN) {
+      return /*html*/ `
+        <div class="AIPRM__w-full AIPRM__my-8">
+          <div class="AIPRM__font-semibold AIPRM__text-xl">You do not have any own prompts at the moment.</div>
+          <a class="AIPRM__underline" href="#" title="Create New Prompt" onclick="event.preventDefault(); AIPRM.createNewPrompt()">Click here to create your own prompt</a>
+        </div>`;
+    }
+
+    if (this.PromptTemplatesType === PromptTemplatesType.CUSTOM_LIST) {
+      const hiddenList = this.Lists.getHidden();
+
+      if (hiddenList && this.PromptTemplatesList === hiddenList.ID) {
+        return /*html*/ `
+          <div class="AIPRM__w-full AIPRM__my-8 AIPRM__inline_svg">
+            <div class="AIPRM__font-semibold AIPRM__text-xl">This list doesn't have any prompts at the moment.</div>
+            Add existing public prompt to Hidden list using ${svg(
+              'Cross'
+            )} icon next to the public prompt title.
+          </div>`;
+      } else if (isFavoritesListView) {
+        return /*html*/ `
+        <div class="AIPRM__w-full AIPRM__my-8 AIPRM__inline_svg">
+          <div class="AIPRM__font-semibold AIPRM__text-xl">This list doesn't have any prompts at the moment.</div>
+          Add existing prompt to Favorites list using ${svg(
+            'Star'
+          )} icon next to the prompt title.
+        </div>`;
+      } else if (
+        selectedList &&
+        (selectedList.ListTypeNo === ListTypeNo.AIPRM_VERIFIED ||
+          selectedList.ListTypeNo === ListTypeNo.CUSTOM ||
+          selectedList.HasWriteAccessForTeamMember(this.Client.UserTeamM))
+      ) {
+        return /*html*/ `
+        <div class="AIPRM__w-full AIPRM__my-8 AIPRM__inline_svg">
+          <div class="AIPRM__font-semibold AIPRM__text-xl">This list doesn't have any prompts at the moment.</div>
+          <a class="AIPRM__underline" href="#" title="Create New Prompt" onclick="event.preventDefault(); AIPRM.createNewPrompt()">Click here to create your own prompt</a> or add existing prompt to this list using ${svg(
+            'SquaresPlus'
+          )} icon next to the prompt title.
+        </div>`;
+      } else {
+        return /*html*/ `
+        <div class="AIPRM__w-full AIPRM__my-8 AIPRM__inline_svg">
+          <div class="AIPRM__font-semibold AIPRM__text-xl">This list doesn't have any prompts at the moment.</div>
+          Only Team Owner can add prompts to this list.
+        </div>`;
+      }
     }
   },
 
@@ -4095,6 +4277,67 @@ ${textContent}
     wrapper
       .querySelector('#continueActionSelect')
       .addEventListener('change', this.changeContinueAction.bind(this));
+  },
+
+  // Insert the "Include My Profile info" checkbox below prompt textarea
+  insertIncludeMyProfileCheckbox() {
+    // Get the prompt textarea input
+    const textarea = document.querySelector(
+      `form textarea:not([name^="${variableIDPrefix}"])`
+    );
+
+    // If there is no textarea, skip
+    if (!textarea) {
+      console.error('insertMyProfileCheckbox: No textarea found');
+      return;
+    }
+
+    // select button element which is in form and it's direct next sibling of textarea
+    let button = textarea.nextElementSibling;
+
+    // If the button is not found, skip
+    if (
+      !button ||
+      !button.tagName ||
+      button.tagName.toLowerCase() !== 'button'
+    ) {
+      console.error('insertMyProfileCheckbox: No button found');
+      return;
+    }
+
+    let wrapper = document.querySelector('#includeMyProfile');
+
+    // Create the wrapper if it doesn't exist
+    if (!wrapper) {
+      wrapper = document.createElement('div');
+      wrapper.className = 'AIPRM__mt-4';
+      wrapper.id = 'includeMyProfile';
+
+      // Insert the wrapper after the submit button
+      button.parentNode.insertBefore(wrapper, button.nextSibling);
+    }
+
+    // Hide for not linked accounts
+    wrapper.className = 'AIPRM__mt-4';
+    if (!this.Client.User.IsLinked) {
+      wrapper.className = 'AIPRM__hidden';
+      this.IncludeMyProfileMessage = false;
+    }
+
+    // Insert the checkbox
+    wrapper.innerHTML = /*html*/ `
+      <label class="AIPRM__text-sm AIPRM__flex AIPRM__items-center AIPRM__mx-2 sm:AIPRM__mx-0"
+        title="Include provided &quot;My Profile&quot; info that you would like ChatGPT to know and remember about you and your preferences.">
+        <input name="includeMyProfile" type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
+          ${this.IncludeMyProfileMessage ? 'checked' : ''} />
+        Include <a class="AIPRM__underline AIPRM__mx-1 AIPRM__cursor-pointer" title="Edit Your Profile" onclick="event.preventDefault(); AIPRM.showAccountModal();">My Profile info</a>
+      </label>
+    `;
+
+    // Add event listener to checkbox to update the include my profile info on change
+    wrapper.querySelector('input').addEventListener('change', (event) => {
+      this.IncludeMyProfileMessage = event.target.checked;
+    });
   },
 
   insertVariablesInputWrapper() {
@@ -5426,6 +5669,9 @@ ${textContent}
             PromptID: prompt.ID,
             Comment: '',
           });
+
+      // Update context menu
+      await this.setupFavoritePromptsContextMenu();
     } catch (error) {
       this.showNotification(
         NotificationSeverity.ERROR,
@@ -5468,6 +5714,9 @@ ${textContent}
     try {
       // remove prompt from favorites list via API and update the local list
       await list.remove(prompt);
+
+      // Update context menu
+      await this.setupFavoritePromptsContextMenu();
     } catch (error) {
       this.showNotification(
         NotificationSeverity.ERROR,
@@ -6305,7 +6554,7 @@ ${textContent}
                       </dd>
                     </div>
 
-                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row">
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
                       <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">OpenAI Account</dt>
                       <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
                         <div>
@@ -6316,6 +6565,23 @@ ${textContent}
                         </div>
                       </dd>
                     </div>
+
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col">
+                      <dt class="AIPRM__w-full AIPRM__py-2 AIPRM__font-medium">My Profile</dt>
+                      <dd class="AIPRM__w-full AIPRM__py-2 AIPRM__justify-between">
+                        <div class="AIPRM__text-right">
+                          <textarea name="MyProfileMessage" class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 120px;" title="Please provide any information that you would like ChatGPT to know and remember about you and your preferences."
+                          placeholder="Please provide any information that you would like ChatGPT to know and remember about you and your preferences." maxlength="2048">${sanitizeInput(
+                            this.getProfileMessage()
+                          )}</textarea>
+
+                          <button class="AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" onclick="AIPRM.saveProfileMessage()">
+                            Save Profile
+                          </button>
+                        </div>
+                      </dd>
+                    </div>
+
                   </dl>
 
                 </div>
@@ -6400,6 +6666,81 @@ ${textContent}
 
     // refresh the prompt templates section to show link to login
     await this.insertPromptTemplatesSection();
+  },
+
+  // Get the user's profile message from localStorage
+  getProfileMessage() {
+    return localStorage.getItem(myProfileMessageKey) || '';
+  },
+
+  // Save the user's profile message to localStorage
+  saveProfileMessage() {
+    try {
+      localStorage.setItem(
+        myProfileMessageKey,
+        document.querySelector('textarea[name="MyProfileMessage"]').value
+      );
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not save your profile, please try again later.',
+        false
+      );
+
+      return;
+    }
+
+    // show notification
+    this.showNotification(
+      NotificationSeverity.SUCCESS,
+      'Your profile has been saved successfully.'
+    );
+  },
+
+  // Reset the option to include the user's profile message
+  resetIncludeMyProfileMessage() {
+    // reset the flag
+    this.IncludeMyProfileMessage = false;
+
+    // uncheck the checkbox if it exists
+    const checkbox = document.querySelector('input[name="includeMyProfile"]');
+    if (checkbox) {
+      checkbox.checked = false;
+    }
+  },
+
+  // Prefill prompt input with the prompt from URL or message
+  prefillPromptInput() {
+    // Get the prompt from URL
+    const prompt =
+      this.PrefillPrompt ||
+      new URLSearchParams(window.location.search).get(queryParamPrompt);
+
+    // If prompt is empty return
+    if (!prompt) {
+      return;
+    }
+
+    // Reset the prefill prompt
+    this.PrefillPrompt = null;
+
+    // Get the prompt textarea input
+    const textarea = document.querySelector(
+      `form textarea:not([name^="${variableIDPrefix}"])`
+    );
+
+    // If there is no textarea, skip
+    if (!textarea) {
+      console.error('prefillPromptInput: No textarea found');
+      return;
+    }
+
+    // Add the continue action prompt to the textarea
+    textarea.value = prompt;
+    textarea.focus();
+
+    // Dispatch the input event to trigger the event listeners and enable the "Submit" button
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
   },
 };
 

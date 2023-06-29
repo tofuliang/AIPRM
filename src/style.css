@@ -1500,6 +1500,11 @@ html[class*="dark"] .AIPRM__multiselect-dropdown-list div:hover {
   background-repeat: no-repeat;
 }
 
+.AIPRM__inline_svg svg {
+  display: inline-block;
+  vertical-align: text-bottom;
+}
+
 html[class*="dark"] .dark\:AIPRM__prose-invert {
   --tw-prose-body: var(--tw-prose-invert-body);
   --tw-prose-headings: var(--tw-prose-invert-headings);
@@ -1879,6 +1884,11 @@ html[class*="dark"] .disabled\:dark\:hover\:AIPRM__text-gray-400:hover:disabled 
 }
 
 @media (min-width: 640px) {
+  .sm\:AIPRM__mx-0 {
+    margin-left: 0px;
+    margin-right: 0px;
+  }
+
   .sm\:AIPRM__mx-4 {
     margin-left: 1rem;
     margin-right: 1rem;
