@@ -2793,6 +2793,15 @@ ${textContent}
       title.nextSibling.style = 'display: none;';
     }
 
+    // Make sure the model selector is not sticky (to avoid overlapping with the prompt templates)
+    const modelSelector = document.querySelector(
+      this.Config.getSelectorConfig().ModelSelectorContainer || null
+    );
+
+    if (modelSelector) {
+      modelSelector.classList.remove('sticky');
+    }
+
     // Get the list of prompt templates
     let templates = this.PromptTemplates;
 
@@ -2831,6 +2840,9 @@ ${textContent}
 
     // Remove 'md:h-full', 'md:max-w-2xl', 'lg:max-w-3xl' classes from the parent element (to make it full width)
     parent.classList.remove('md:h-full', 'md:max-w-2xl', 'lg:max-w-3xl');
+
+    // Remove 'flex' from the parent element (to avoid overlapping of the prompt templates and model selector)
+    parent.classList.remove('flex');
 
     // Add 'AIPRM__w-full' class to the parent element (to make it full width)
     parent.classList.add('AIPRM__w-full');
