@@ -15,7 +15,7 @@ const getEnvironmentConfig = () => {
       };
     case 'test':
       return {
-        APIEndpoint: 'https://test-api.aiprm.com/api3',
+        APIEndpoint: 'https://test-api.aiprm.com/api4',
         APIEndpointAPP: 'https://test-app.aiprm.com/api',
         AppAccountURL: 'https://test-app.aiprm.com/account',
         AppPricingURL: 'https://test-app.aiprm.com/pricing',
@@ -24,7 +24,7 @@ const getEnvironmentConfig = () => {
       };
     case 'local':
       return {
-        APIEndpoint: 'https://dev-api.aiprm.com/api3',
+        APIEndpoint: 'https://dev-api.aiprm.com/api4',
         APIEndpointAPP: 'https://dev-app.aiprm.com/api',
         AppAccountURL: 'https://dev-app.aiprm.com/account',
         AppPricingURL: 'https://dev-app.aiprm.com/pricing',
@@ -33,7 +33,7 @@ const getEnvironmentConfig = () => {
       };
     default:
       return {
-        APIEndpoint: 'https://api.aiprm.com/api3',
+        APIEndpoint: 'https://api.aiprm.com/api4',
         APIEndpointAPP: 'https://app1.aiprm.com/api',
         AppAccountURL: 'https://app1.aiprm.com/account',
         AppPricingURL: 'https://app1.aiprm.com/pricing',
@@ -123,7 +123,7 @@ export {
 
 /** @typedef {{Enabled: boolean, Config: {Selectors: Object.<string, string>}} WatermarkConfig */
 
-/** @typedef {{FirstPrompt: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string}} SelectorConfig */
+/** @typedef {{FirstPrompt: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string, ShareButton: string}} SelectorConfig */
 
 /** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig}, Selectors: SelectorConfig}} RemoteConfig */
 

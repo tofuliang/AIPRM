@@ -25,7 +25,7 @@ const NotificationMessageSeverityClassName = {
  */
 const showMessage = (messages, confirmCallback, voteCallback) => {
   // get the first active and not expired message with MessageSeverityNo.MANDATORY_MUST_CONFIRM
-  let message = messages.find(
+  let message = messages?.find(
     (message) =>
       message.MessageStatusNo === MessageStatusNo.ACTIVE &&
       message.MessageSeverityNo === MessageSeverityNo.MANDATORY_MUST_CONFIRM &&
@@ -40,7 +40,7 @@ const showMessage = (messages, confirmCallback, voteCallback) => {
   }
 
   // otherwise, get the first active and not expired message with other MessageSeverityNo (if any)
-  message = messages.find(
+  message = messages?.find(
     (message) =>
       message.MessageStatusNo === MessageStatusNo.ACTIVE &&
       message.MessageSeverityNo !== MessageSeverityNo.MANDATORY_MUST_CONFIRM &&

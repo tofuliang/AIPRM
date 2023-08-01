@@ -236,6 +236,22 @@ let QuotaMessages = {
     <a class="AIPRM__underline" href="${AppPricingURL}">View available plans here.</a>
   </p>`,
 
+  CONNECT_ACCOUNT_UPGRADE_TO_USE_HIDE_WATERMARK: /*html*/ `
+  <h3>Connect OpenAI and AIPRM Accounts</h3>
+
+  <p class="AIPRM__my-4">
+    To use the Hide Watermark feature, you must connect your OpenAI account with your AIPRM account and subscribe to the <b>AIPRM Elite</b> plan or higher.
+  </p>`,
+
+  UPGRADE_ACCOUNT_HIDE_WATERMARK: /*html*/ `
+  <h3>Upgrade AIPRM Account</h3>
+
+  <p class="AIPRM__my-4">
+    To use the Hide Watermark feature, you must subscribe to the <b>AIPRM Elite</b> plan or higher.
+    <br><br>
+    <a class="AIPRM__underline" href="${AppPricingURL}">View available plans here.</a>
+  </p>`,
+
   UPGRADE_ACCOUNT_PROMPT_VARIABLE_VALUES: /*html*/ `
   <h3>Upgrade AIPRM Account</h3>
 
@@ -758,6 +774,26 @@ export class UserQuota {
     return false;
   }
 
+  // Check if user can use "Hide Watermark" (requires certain plan level)
+  canUseHideWatermark(showModal = true) {
+    // Plan level must be at least "ELITE"
+    if (this.#quota.MaxLevel >= PlanLevelNo.ELITE) {
+      return true;
+    }
+
+    if (showModal) {
+      // Show modal to upgrade account to use "Hide Watermark" (or connect OpenAI account to AIPRM account and then upgrade, if not connected)
+      this.showModal(
+        !this.#user.IsLinked
+          ? QuotaMessages.CONNECT_ACCOUNT_UPGRADE_TO_USE_HIDE_WATERMARK
+          : QuotaMessages.UPGRADE_ACCOUNT_HIDE_WATERMARK,
+        !this.#user.IsLinked ? AppSignupURL : AppPricingURL
+      );
+    }
+
+    return false;
+  }
+
   /**
    * Show modal with announcement to connect OpenAI account to AIPRM account
    *
@@ -768,7 +804,11 @@ export class UserQuota {
       return false;
     }
 
-    this.showModal(QuotaMessages.CONNECT_ACCOUNT_ANNOUNCEMENT, AppSignupURL);
+    this.showModal(
+      QuotaMessages.CONNECT_ACCOUNT_ANNOUNCEMENT,
+      AppSignupURL,
+      true
+    );
 
     return true;
   }
@@ -779,7 +819,7 @@ export class UserQuota {
    * @param {string} message
    * @param {string} actionURL
    */
-  showModal(message = '', actionURL = '') {
+  showModal(message = '', actionURL = '', showMessages = false) {
     let quotaMessageModal = document.getElementById('quotaMessageModal');
 
     // if modal does not exist, create it, add event listener on submit and append it to body
@@ -806,8 +846,7 @@ export class UserQuota {
               </div>
 
               <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
-                <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
-                        onclick="AIPRM.hideModal('quotaMessageModal')">Cancel</button>
+                <button id="quotaMessageModalCancel" type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white">Cancel</button>
                 <button id="quotaMessageModalSubmit" class="AIPRM__bg-green-600 hover:AIPRM__bg-green-700 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white">Continue</button>
               </div>
             </div>
@@ -817,6 +856,30 @@ export class UserQuota {
       </div>
     `;
 
+    // add event listener to close the modal on ESC
+    const keydownListener = (e) => {
+      if (e.key === 'Escape') {
+        closeModal();
+      }
+    };
+
+    // close modal and remove event listener on ESC
+    const closeModal = () => {
+      window.AIPRM.hideModal('quotaMessageModal', showMessages);
+      document.removeEventListener('keydown', keydownListener);
+    };
+
+    document.addEventListener('keydown', keydownListener);
+
+    // add event listener for quotaMessageModalCancel button
+    const quotaMessageModalCancel = document.getElementById(
+      'quotaMessageModalCancel'
+    );
+
+    if (quotaMessageModalCancel) {
+      quotaMessageModalCancel.addEventListener('click', closeModal);
+    }
+
     // add event listener for quotaMessageModalSubmit button
     const quotaMessageModalSubmit = document.getElementById(
       'quotaMessageModalSubmit'
@@ -824,7 +887,7 @@ export class UserQuota {
 
     if (quotaMessageModalSubmit) {
       quotaMessageModalSubmit.addEventListener('click', () => {
-        window.AIPRM.hideModal('quotaMessageModal');
+        closeModal();
 
         // open action URL in new tab
         window.open(actionURL, '_blank');
@@ -833,13 +896,6 @@ export class UserQuota {
 
     // show modal
     quotaMessageModal.style = 'display: block;';
-
-    // add event listener to close the modal on ESC
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        window.AIPRM.hideModal('quotaMessageModal');
-      }
-    });
   }
 
   /**

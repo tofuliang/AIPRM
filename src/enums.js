@@ -134,6 +134,7 @@ const SubPromptTypeNo = {
   CustomTones: 10,
   CustomStyles: 20,
   CustomContinue: 30,
+  MyProfileInfo: 50,
 };
 
 /** @enum {number} */
@@ -183,6 +184,8 @@ const MemberRoleNo = {
   UNKNOWN: 0,
   OWNER: 1,
   READ_ONLY: 2,
+  READ_WRITE: 4,
+  ADMIN: 8,
 };
 
 /** @enum {number} */

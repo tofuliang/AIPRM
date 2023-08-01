@@ -523,6 +523,10 @@
   top: 0px;
 }
 
+.AIPRM__top-12 {
+  top: 3rem;
+}
+
 .AIPRM__top-2 {
   top: 0.5rem;
 }
@@ -579,6 +583,14 @@
 .AIPRM__my-8 {
   margin-top: 2rem;
   margin-bottom: 2rem;
+}
+
+.AIPRM__-mb-1 {
+  margin-bottom: -0.25rem;
+}
+
+.AIPRM__-mb-1\.5 {
+  margin-bottom: -0.375rem;
 }
 
 .AIPRM__-mt-0 {
@@ -743,6 +755,10 @@
 
 .AIPRM__w-full {
   width: 100%;
+}
+
+.AIPRM__max-w-\[6rem\] {
+  max-width: 6rem;
 }
 
 .AIPRM__max-w-full {
@@ -1101,8 +1117,16 @@
   padding-bottom: 1rem;
 }
 
+.AIPRM__pl-10 {
+  padding-left: 2.5rem;
+}
+
 .AIPRM__pl-2 {
   padding-left: 0.5rem;
+}
+
+.AIPRM__pr-10 {
+  padding-right: 2.5rem;
 }
 
 .AIPRM__pr-4 {
@@ -1345,9 +1369,10 @@
 @media (min-width: 640px) {
   /* #region Watermark for all responses with AIPRM logo - devices >= SM */
 
+  /* disabled - breaks styling of numbered/bulleted lists
   .AIPRM__conversation__response {
     position: relative;
-  }
+  } */
 
   .AIPRM__conversation__response::after {
     content: '';
@@ -1503,6 +1528,27 @@ html[class*='dark'] .AIPRM__multiselect-dropdown-list div:hover {
 .AIPRM__inline_svg svg {
   display: inline-block;
   vertical-align: text-bottom;
+}
+
+/* #region remove excessive padding from prompt textarea with "include My Profile info" & "Code Interpreter" model */
+
+form div:has(#includeMyProfile:not(.AIPRM__hidden)) > textarea#prompt-textarea {
+  padding-left: 0.75rem !important;
+}
+
+@media (min-width: 768px) {
+  form
+    div:has(#includeMyProfile:not(.AIPRM__hidden))
+    > textarea#prompt-textarea {
+    padding-left: 0px !important;
+  }
+}
+
+/* #endregion remove excessive padding from prompt textarea with "include My Profile info" & "Code Interpreter" model */
+
+.AIPRM__share-button {
+  margin-right: 5rem;
+  margin-left: -5rem;
 }
 
 html[class*="dark"] .dark\:AIPRM__prose-invert {
@@ -1683,6 +1729,11 @@ html[class*="dark"] .dark\:AIPRM__prose-invert {
 
 .AIPRM__group:hover .group-hover\:AIPRM__visible {
   visibility: visible;
+}
+
+.AIPRM__group:hover .group-hover\:AIPRM__bg-gray-200 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(217 217 227 / var(--tw-bg-opacity));
 }
 
 .AIPRM__peer:checked ~ .peer-checked\:AIPRM__bg-gray-600 {
@@ -1883,12 +1934,12 @@ html[class*="dark"] .disabled\:dark\:hover\:AIPRM__text-gray-400:hover:disabled 
   color: rgb(172 172 190 / var(--tw-text-opacity));
 }
 
-@media (min-width: 640px) {
-  .sm\:AIPRM__mx-0 {
-    margin-left: 0px;
-    margin-right: 0px;
-  }
+html[class*="dark"] .AIPRM__group:hover .dark\:group-hover\:AIPRM__bg-gray-900 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(32 33 35 / var(--tw-bg-opacity));
+}
 
+@media (min-width: 640px) {
   .sm\:AIPRM__mx-4 {
     margin-left: 1rem;
     margin-right: 1rem;
@@ -1897,6 +1948,14 @@ html[class*="dark"] .disabled\:dark\:hover\:AIPRM__text-gray-400:hover:disabled 
   .sm\:AIPRM__my-8 {
     margin-top: 2rem;
     margin-bottom: 2rem;
+  }
+
+  .sm\:AIPRM__ml-2 {
+    margin-left: 0.5rem;
+  }
+
+  .sm\:AIPRM__inline-block {
+    display: inline-block;
   }
 
   .sm\:AIPRM__w-1\/2 {
@@ -1913,6 +1972,10 @@ html[class*="dark"] .disabled\:dark\:hover\:AIPRM__text-gray-400:hover:disabled 
 
   .sm\:AIPRM__max-w-lg {
     max-width: 32rem;
+  }
+
+  .sm\:AIPRM__max-w-xs {
+    max-width: 20rem;
   }
 
   .sm\:AIPRM__flex-row {
@@ -1939,6 +2002,14 @@ html[class*="dark"] .disabled\:dark\:hover\:AIPRM__text-gray-400:hover:disabled 
 @media (min-width: 768px) {
   .md\:AIPRM__invisible {
     visibility: hidden;
+  }
+
+  .md\:AIPRM__top-2 {
+    top: 0.5rem;
+  }
+
+  .md\:AIPRM__ml-0 {
+    margin-left: 0px;
   }
 
   .md\:AIPRM__flex {

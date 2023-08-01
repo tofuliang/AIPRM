@@ -51,7 +51,7 @@ import { Reaction } from './rxn.js';
  * @property {User} User
  * @property {UserQuota} UserQuota
  * @property {UserTeamM} UserTeamM
- * @property {UserTeam[]} OwnTeamS
+ * @property {UserTeam[]} OwnTeamS    // Team where user is owner or admin
  * @property {AppUser} AppUser
  * @property {SubPrompt[]} AccountSubPrompts
  * @property {() => Promise<void>} init
@@ -78,9 +78,10 @@ import { Reaction } from './rxn.js';
  * @property {() => Promise<List[]>} getAllListsWithDetails
  * @property {(TypeNo: ListTypeNo, Comment?: string, FirstItem?: FirstListItem) => Promise<List>} createList
  * @property {(List: List) => Promise<List>} updateList
- * @property {(ListID: List['ID']) => Promise<void>} deleteList
+ * @property {(ListID: List['ID'], ListTypeNo: List['ListTypeNo'], ForTeamID?: List['ForTeamID']) => Promise<void>} deleteList
  * @property {(ListID: string, PromptID: string) => Promise<ListItem>} addToList
  * @property {(ListID: List['ID'], PromptID: import('./inject.js').Prompt['ID']) => Promise<void>} removeFromList
+ * @property {(myProfileInfo: string) => Promise<SubPrompt>} createMyProfileInfo
  * @property {(response: Response) => Promise<any>} handleResponse
  */
 
@@ -207,7 +208,9 @@ const AIPRMClient = {
             res.TeamS !== null
           ) {
             this.OwnTeamS = res.TeamS.filter(
-              (team) => team.MemberRoleNo === MemberRoleNo.OWNER
+              (team) =>
+                team.MemberRoleNo === MemberRoleNo.OWNER ||
+                team.MemberRoleNo === MemberRoleNo.ADMIN
             );
 
             this.UserTeamM = new Map();
@@ -709,11 +712,18 @@ const AIPRMClient = {
    * Delete list using AIPRM API endpoint
    *
    * @param {List['ID']} ListID
+   * @param {List['ListTypeNo']} ListTypeNo
+   * @param {List['ForTeamID']} ForTeamID
    * @returns {Promise<void>}
    */
-  deleteList(ListID) {
+  deleteList(ListID, ListTypeNo, ForTeamID = undefined) {
+    var forTeamIDQueryParam = '';
+    if (ForTeamID !== undefined && ForTeamID !== null && ForTeamID !== '') {
+      forTeamIDQueryParam = `&ForTeamID=${ForTeamID}`;
+    }
+
     return fetch(
-      `${APIEndpoint}/List/${ListID}?ExternalID=${this.User.ExternalID}&ExternalSystemNo=${this.User.ExternalSystemNo}&UserFootprint=${this.User.UserFootprint}`,
+      `${APIEndpoint}/List/${ListID}?ExternalID=${this.User.ExternalID}&ExternalSystemNo=${this.User.ExternalSystemNo}&UserFootprint=${this.User.UserFootprint}&ListTypeNo=${ListTypeNo}${forTeamIDQueryParam}`,
       {
         method: 'DELETE',
         headers: {
@@ -764,6 +774,26 @@ const AIPRMClient = {
         },
       }
     ).then(this.handleResponse);
+  },
+
+  /**
+   * Create MyProfileInfo using AIPRM API endpoint
+   *
+   * @param {string} myProfileInfo
+   * @returns {Promise<SubPrompt>}
+   */
+  createMyProfileInfo(myProfileInfo) {
+    return fetch(`${APIEndpoint}/User/AccountSubPrompts/MyProfileInfo`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        Label: 'My Profile',
+        Prompt: myProfileInfo,
+        User: this.User,
+      }),
+    }).then(this.handleResponse);
   },
 
   /**

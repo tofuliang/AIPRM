@@ -101,7 +101,7 @@ const css = function (name) {
     case 'tag':
       return 'AIPRM__inline-flex AIPRM__items-center AIPRM__py-1 AIPRM__px-2 AIPRM__mr-2 AIPRM__mb-2 AIPRM__text-sm AIPRM__font-medium AIPRM__text-white AIPRM__rounded AIPRM__bg-gray-600 AIPRM__whitespace-nowrap';
     case 'languageSelectWrapper':
-      return 'AIPRM__flex AIPRM__gap-3 lg:AIPRM__max-w-3xl md:last:AIPRM__mb-6 AIPRM__mx-2 AIPRM__pt-2 AIPRM__stretch AIPRM__justify-between AIPRM__text-sm AIPRM__items-end AIPRM__pb-2 AIPRM__mb-2 AIPRM__border-b AIPRM__flex-col sm:AIPRM__flex-row';
+      return 'AIPRM__flex AIPRM__gap-3 lg:AIPRM__max-w-3xl md:last:AIPRM__mb-6 AIPRM__ml-2 md:AIPRM__ml-0 AIPRM__pt-2 AIPRM__stretch AIPRM__justify-between AIPRM__text-sm AIPRM__items-end AIPRM__pb-2 AIPRM__mb-2 AIPRM__border-b AIPRM__flex-col sm:AIPRM__flex-row';
     case 'select':
       return 'AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-600 dark:AIPRM__border-gray-600 dark:hover:AIPRM__bg-gray-900 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0';
     case 'selectLabel':
@@ -118,7 +118,7 @@ const sanitizeInput = function (input) {
 };
 
 // hide modal with modalID
-const hideModal = function (modalID) {
+const hideModal = function (modalID, showMessages = false) {
   const modal = document.getElementById(modalID);
 
   if (!modal) {
@@ -127,6 +127,13 @@ const hideModal = function (modalID) {
 
   // remove the modal from the DOM
   modal.remove();
+
+  // show messages after closing the modal with a small delay
+  if (showMessages) {
+    setTimeout(() => {
+      window.AIPRM.showMessages();
+    }, 1000);
+  }
 };
 
 // capitalize the first letter of each word

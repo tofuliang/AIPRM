@@ -113,6 +113,8 @@ import { MultiselectDropdown } from './multiselect-dropdown.js';
 
 /** @typedef {{ID: number, Label: string, Prompt: string}} ContinueAction */
 
+/** @typedef {{ID: number, Label: string, Info: string}} MyProfileInfo */
+
 /** @typedef {{ID: string, LabelUser: string, LabelAuthor: string, StatusNo: ModelStatusNo}} Model */
 
 const DefaultPromptActivity = 'all';
@@ -128,6 +130,9 @@ const lastPromptTemplateTypeKey = 'lastPromptTemplateType';
 const lastListIDKey = 'lastListID';
 
 const myProfileMessageKey = 'myProfileMessageAIPRM';
+const hideWatermarkKey = 'AIPRM_hideWatermark';
+const includeMyProfileInfoKey = 'AIPRM_includeMyProfileInfo';
+const selectedMyProfileInfoKey = 'AIPRM_selectedMyProfileInfoKey';
 
 const queryParamPromptID = 'AIPRM_PromptID';
 const queryParamVariable = 'AIPRM_VARIABLE';
@@ -260,6 +265,9 @@ window.AIPRM = {
   /** @type {ContinueAction[]} */
   ContinueActions: [],
 
+  /** @type {MyProfileInfo[]} */
+  MyProfileInfos: [],
+
   /** @type {Model[]} */
   Models: [],
 
@@ -290,8 +298,11 @@ window.AIPRM = {
   /** @type {import('./client.js').Message[]} */
   Messages: [],
 
-  // Include my profile message in the submitted prompt
-  IncludeMyProfileMessage: false,
+  // Selected my profile info to include in the submitted prompt
+  IncludeMyProfileMessage:
+    localStorage.getItem(includeMyProfileInfoKey) === 'true' ? true : false,
+  SelectedMyProfileInfoID:
+    +localStorage.getItem(selectedMyProfileInfoKey) || null,
 
   // Prefill prompt via event
   PrefillPrompt: null,
@@ -340,6 +351,9 @@ window.AIPRM = {
       clientInitialized ? Promise.resolve() : this.Client.init(),
     ]);
 
+    // Sort lists after fetching of UserTeamM
+    this.Lists.sort();
+
     this.replaceFetch();
 
     this.createObserver();
@@ -357,10 +371,13 @@ window.AIPRM = {
       this.fetchTones(),
       this.fetchWritingStyles(),
       this.fetchContinueActions(),
+      this.fetchMyProfileInfos(),
     ]);
 
+    await this.storeMyProfileInfoFromLocalStorage();
+
     this.insertLanguageToneWritingStyleContinueActions();
-    this.insertIncludeMyProfileCheckbox();
+    this.insertIncludeMyProfileInfo();
     this.insertVariablesInputWrapper();
 
     this.setupSidebar();
@@ -377,6 +394,15 @@ window.AIPRM = {
     document.addEventListener('AIPRM.tokens', async (event) => {
       this.handleTokensEvent(event);
     });
+
+    try {
+      // reset hide watermark if user cannot longer use this feature
+      if (!this.Client.UserQuota.canUseHideWatermark(false)) {
+        localStorage.setItem(hideWatermarkKey, '');
+      }
+    } catch (error) {
+      console.error(error);
+    }
 
     this.addWatermark();
 
@@ -1164,6 +1190,72 @@ ${textContent}
     );
   },
 
+  // Fetch list of my profile infos from AccountSubPrompts
+  fetchMyProfileInfos() {
+    /** @type {MyProfileInfo[]} */
+    this.MyProfileInfos = this.Client.AccountSubPrompts
+      // filter out prompts that are not MyProfileInfo
+      .filter((prompt) => prompt.TypeNo === SubPromptTypeNo.MyProfileInfo)
+      // map the prompts to MyProfileInfos
+      .map((prompt) => {
+        return {
+          ID: parseInt(prompt.PromptID),
+          Label: prompt.Label,
+          Info: prompt.Prompt,
+        };
+      })
+      // sort the MyProfileInfos by Label
+      .sort((a, b) => a.Label.localeCompare(b.Label));
+
+    // reset includeMyProfileInfo if there are no custom MyProfileInfos
+    if (this.MyProfileInfos.length === 0) {
+      this.resetIncludeMyProfileInfo();
+    }
+  },
+
+  // If MyProfileInfo is store in local storage, then store it in backend and remove it from local storage
+  async storeMyProfileInfoFromLocalStorage() {
+    // cannot store MyProfileInfo if user is not linked
+    if (!this.Client.User.IsLinked) {
+      return;
+    }
+
+    try {
+      const myProfileInfo = localStorage.getItem(myProfileMessageKey);
+
+      // if there is no myProfileInfo in local storage, then return
+      if (!myProfileInfo) {
+        return;
+      }
+
+      // create MyProfileInfo
+      const subPrompt = await this.Client.createMyProfileInfo(myProfileInfo);
+
+      // add created MyProfileInfo to this.MyProfileInfos
+      this.MyProfileInfos.push({
+        ID: parseInt(subPrompt.PromptID),
+        Label: subPrompt.Label,
+        Info: subPrompt.Prompt,
+      });
+
+      // remove the old myProfileInfo from local storage
+      localStorage.removeItem(myProfileMessageKey);
+    } catch (error) {
+      // user has reached the limit of max. MyProfileInfos quota
+      if (
+        error instanceof Reaction &&
+        error.ReactionNo === ReactionNo.RXN_AIPRM_QUOTA_EXCEEDED
+      ) {
+        // remove the old myProfileInfo from local storage
+        localStorage.removeItem(myProfileMessageKey);
+
+        return;
+      }
+
+      console.error(error);
+    }
+  },
+
   // Fetch list of models from a remote CSV file
   fetchModels() {
     return (
@@ -1356,9 +1448,6 @@ ${textContent}
       // If the request is not for the chat backend API, just use the original fetch function
       if (t[0] !== EndpointConversation) return this.fetch(...t);
 
-      // Get the profile message
-      const profileMessage = this.getProfileMessage();
-
       // If no prompt template, tone, writing style or target language has been selected,
       // use only the profile message or the original fetch function if the profile message is not needed
       if (
@@ -1368,9 +1457,9 @@ ${textContent}
         !this.TargetLanguage
       ) {
         // Use profile message if needed - otherwise, use the original fetch function
-        if (!this.IncludeMyProfileMessage || !profileMessage) {
-          // Reset the IncludeMyProfileMessage
-          this.resetIncludeMyProfileMessage();
+        if (!this.IncludeMyProfileMessage || !this.SelectedMyProfileInfoID) {
+          // Reset the includeMyProfileInfo
+          this.resetIncludeMyProfileInfo();
 
           return this.fetch(...t);
         }
@@ -1382,11 +1471,20 @@ ${textContent}
           // Parse the request body from JSON
           const body = JSON.parse(options.body);
 
-          // Add the profile message to the request body
-          body.messages[0].content.parts[0] += `\n\n${profileMessage}`;
+          const myProfileInfo = this.MyProfileInfos
+            ? this.MyProfileInfos.find(
+                (myProfileInfo) =>
+                  myProfileInfo.ID === this.SelectedMyProfileInfoID
+              )
+            : null;
 
-          // Reset the IncludeMyProfileMessage
-          this.resetIncludeMyProfileMessage();
+          if (myProfileInfo) {
+            // Add the profile message to the request body
+            body.messages[0].content.parts[0] += `\n\n${myProfileInfo.Info}`;
+          }
+
+          // Reset the includeMyProfileInfo
+          this.resetIncludeMyProfileInfo();
 
           // Stringify the modified request body and update the options object
           options.body = JSON.stringify(body);
@@ -1505,20 +1603,29 @@ ${textContent}
           );
         }
 
+        // Inject profile message into the request body if available
+        if (this.IncludeMyProfileMessage && this.SelectedMyProfileInfoID) {
+          const myProfileInfo = this.MyProfileInfos
+            ? this.MyProfileInfos.find(
+                (myProfileInfo) =>
+                  myProfileInfo.ID === this.SelectedMyProfileInfoID
+              )
+            : null;
+
+          if (myProfileInfo) {
+            body.messages[0].content.parts[0] += `\n\n${myProfileInfo.Info}`;
+          }
+
+          // Reset the includeMyProfileInfo
+          this.resetIncludeMyProfileInfo();
+        }
+
         // If the user has selected a tone, writing style or target language, add a prompt to the request body
         if (toneWritingStyleLanguagePrompt.length > 0) {
           body.messages[0].content.parts[0] += `\n\nPlease write in ${toneWritingStyleLanguagePrompt.join(
             ', '
           )}.`;
         }
-
-        // Inject profile message into the request body if available
-        if (profileMessage && this.IncludeMyProfileMessage) {
-          body.messages[0].content.parts[0] += `\n\n${profileMessage}`;
-        }
-
-        // Reset the IncludeMyProfileMessage
-        this.resetIncludeMyProfileMessage();
 
         // Clear the selected prompt template
         await this.selectPromptTemplateByIndex(null);
@@ -1539,8 +1646,12 @@ ${textContent}
 
   // Add AIPRM watermark to conversation responses
   addWatermark() {
-    // no config available or watermark is not enabled
-    if (!this.Config || !this.Config.isWatermarkEnabled()) {
+    // no config available or watermark is not enabled or watermark is hidden by user settings
+    if (
+      !this.Config ||
+      !this.Config.isWatermarkEnabled() ||
+      this.getHideWatermark()
+    ) {
       return;
     }
 
@@ -1584,7 +1695,7 @@ ${textContent}
       if (button) button.style = 'pointer-events: none;opacity: 0.5';
 
       this.insertLanguageToneWritingStyleContinueActions();
-      this.insertIncludeMyProfileCheckbox();
+      this.insertIncludeMyProfileInfo();
     }
 
     // Enable "Export Button" when a new chat started.
@@ -1594,7 +1705,7 @@ ${textContent}
       if (button) button.style = '';
 
       this.insertLanguageToneWritingStyleContinueActions();
-      this.insertIncludeMyProfileCheckbox();
+      this.insertIncludeMyProfileInfo();
     }
 
     // Add "Save prompt as template" button, if new prompt was added
@@ -1615,6 +1726,8 @@ ${textContent}
       return;
     }
 
+    this.updateShareButton();
+
     // Display sidebar icon only in new and existing conversations
     const selectorConfig = this.Config.getSelectorConfig();
 
@@ -1629,7 +1742,7 @@ ${textContent}
     sidebarIcon.id = 'AIPRM__sidebar-icon';
 
     sidebarIcon.className =
-      'AIPRM__p-2 AIPRM__items-center AIPRM__transition-colors AIPRM__duration-200 AIPRM__cursor-pointer AIPRM__text-sm AIPRM__rounded-md AIPRM__border AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__border-black/10 dark:AIPRM__border-white/20 hover:AIPRM__bg-gray-50 dark:hover:AIPRM__bg-gray-700 AIPRM__cursor-pointer AIPRM__fixed AIPRM__top-2 AIPRM__right-4 AIPRM__z-30';
+      'AIPRM__p-2 AIPRM__top-12 md:AIPRM__top-2 AIPRM__p-2 AIPRM__items-center AIPRM__transition-colors AIPRM__duration-200 AIPRM__cursor-pointer AIPRM__text-sm AIPRM__rounded-md AIPRM__border AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__border-black/10 dark:AIPRM__border-white/20 hover:AIPRM__bg-gray-50 dark:hover:AIPRM__bg-gray-700 AIPRM__cursor-pointer AIPRM__fixed AIPRM__right-4 AIPRM__z-30';
 
     sidebarIcon.title = 'Open AIPRM sidebar';
 
@@ -1677,6 +1790,18 @@ ${textContent}
     document
       .querySelector('.flex.flex-col.text-sm.dark\\:bg-gray-800')
       .appendChild(sidebar);
+  },
+
+  updateShareButton() {
+    const shareButtonSection = document.querySelector(
+      this.Config.getSelectorConfig().ShareButton
+    );
+
+    if (!shareButtonSection) {
+      return;
+    }
+
+    shareButtonSection.classList.add('AIPRM__share-button');
   },
 
   // Add "Save prompt as template" button to the user prompt container next to the "Edit" button
@@ -1988,8 +2113,7 @@ ${textContent}
       const ownTeamLists = this.Lists.lists.filter(
         (list) =>
           list.ListTypeNo == ListTypeNo.TEAM_CUSTOM &&
-          this.Client.UserTeamM?.get(list.ForTeamID)?.MemberRoleNo ==
-            MemberRoleNo.OWNER
+          list.HasWriteAccessForTeamMember(this.Client.UserTeamM)
       );
 
       if (ownTeamLists.length == 1) {
@@ -2037,8 +2161,7 @@ ${textContent}
           const ownTeamLists = this.Lists.lists.filter(
             (list) =>
               list.ListTypeNo == ListTypeNo.TEAM_CUSTOM &&
-              this.Client.UserTeamM?.get(list.ForTeamID)?.MemberRoleNo ==
-                MemberRoleNo.OWNER
+              list.HasWriteAccessForTeamMember(this.Client.UserTeamM)
           );
 
           const isInOwnTeamList = await this.isPromptInAtLeastOneList(
@@ -2164,7 +2287,10 @@ ${textContent}
           if (!isInOwnPrivateList) {
             // show modal to pick list
             this.showListSelectionModal(
-              this.Lists.getCustomWithWriteAccess(this.Client.UserQuota),
+              this.Lists.getCustomWithWriteAccess(
+                this.Client.UserQuota,
+                this.Client.UserTeamM
+              ),
               prompt,
               false
             );
@@ -2820,7 +2946,7 @@ ${textContent}
       templates.map(async (template, index) => ({
         ...template,
         ID: index,
-        IsHidden: await this.isHidden(index),
+        IsHidden: await this.isHidden(template),
       }))
     );
 
@@ -3061,8 +3187,9 @@ ${textContent}
                       } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__gap-2 AIPRM__w-full"> 
                       ${
                         list.ListTypeNo === ListTypeNo.TEAM_CUSTOM
-                          ? this.Client.UserTeamM?.get(list.ForTeamID)
-                              ?.MemberRoleNo === MemberRoleNo.OWNER
+                          ? list.HasWriteAccessForTeamMember(
+                              this.Client.UserTeamM
+                            )
                             ? svg('TeamListSolid')
                             : svg('TeamList')
                           : ''
@@ -3239,8 +3366,12 @@ ${textContent}
 
               ${
                 isCustomListView &&
-                (selectedList.OwnList ||
+                ((template.OwnPrompt &&
                   selectedList.HasWriteAccessForTeamMember(
+                    this.Client.UserTeamM
+                  )) ||
+                  selectedList.OwnList ||
+                  selectedList.HasAdminAccessForTeamMember(
                     this.Client.UserTeamM
                   ))
                   ? /*html*/ `
@@ -3515,8 +3646,7 @@ ${textContent}
             this.PromptTemplatesType !== PromptTemplatesType.CUSTOM_LIST ||
             selectedList.ListTypeNo === ListTypeNo.CUSTOM ||
             (selectedList.ListTypeNo === ListTypeNo.TEAM_CUSTOM &&
-              this.Client.UserTeamM?.get(selectedList.ForTeamID)
-                ?.MemberRoleNo === MemberRoleNo.OWNER)
+              selectedList.HasWriteAccessForTeamMember(this.Client.UserTeamM))
               ? /*html*/ `<button onclick="AIPRM.createNewPrompt()" class="${css`card`} AIPRM__relative AIPRM__group AIPRM__justify-center AIPRM__items-center">
               <div class="AIPRM__flex AIPRM__items-center AIPRM__gap-3">
                 ${svg('Plus')}
@@ -3675,7 +3805,7 @@ ${textContent}
         return /*html*/ `
         <div class="AIPRM__w-full AIPRM__my-8 AIPRM__inline_svg">
           <div class="AIPRM__font-semibold AIPRM__text-xl">This list doesn't have any prompts at the moment.</div>
-          Only Team Owner can add prompts to this list.
+          Only Team Owner, Team Admin or Team User with Read-Write access can add prompts to this list.
         </div>`;
       }
     }
@@ -3709,7 +3839,7 @@ ${textContent}
             ${
               this.Client.UserQuota?.hasTeamsFeatureEnabled() &&
               (list.ListTypeNo === ListTypeNo.CUSTOM ||
-                list.HasAdminAccessForTeamMember(this.Client.UserTeamM))
+                list.HasOwnerAccessForTeamMember(this.Client.UserTeamM))
                 ? /*html*/ `
                 <li class="AIPRM__flex AIPRM__items-center AIPRM__py-2 AIPRM__px-4 hover:!AIPRM__bg-gray-50 dark:hover:!AIPRM__bg-gray-700 AIPRM__text-gray-800 dark:AIPRM__text-gray-100" onclick="event.stopPropagation();AIPRM.toggleTeamList('${
                   list.ID
@@ -4115,9 +4245,7 @@ ${textContent}
     }
 
     // Hide the spacer for absolutely positioned prompt input
-    const spacer = document.querySelector(
-      '.w-full.h-32.md\\:h-48.flex-shrink-0'
-    );
+    const spacer = document.querySelector('.h-32.md\\:h-48.flex-shrink-0');
 
     if (spacer) {
       spacer.style = 'display: none';
@@ -4291,8 +4419,8 @@ ${textContent}
       .addEventListener('change', this.changeContinueAction.bind(this));
   },
 
-  // Insert the "Include My Profile info" checkbox below prompt textarea
-  insertIncludeMyProfileCheckbox() {
+  // Insert the "Include My Profile info" below prompt textarea
+  insertIncludeMyProfileInfo() {
     // Get the prompt textarea input
     const textarea = document.querySelector(
       `form textarea:not([name^="${variableIDPrefix}"])`
@@ -4300,12 +4428,13 @@ ${textContent}
 
     // If there is no textarea, skip
     if (!textarea) {
-      console.error('insertMyProfileCheckbox: No textarea found');
+      console.error('insertMyProfileInfo: No textarea found');
       return;
     }
 
-    // select button element which is in form and it's direct next sibling of textarea
-    let button = textarea.nextElementSibling;
+    // select last button element for parent element of textarea
+    let buttons = textarea.parentElement.querySelectorAll('button');
+    let button = buttons && buttons.length ? buttons[buttons.length - 1] : null;
 
     // If the button is not found, skip
     if (
@@ -4313,16 +4442,18 @@ ${textContent}
       !button.tagName ||
       button.tagName.toLowerCase() !== 'button'
     ) {
-      console.error('insertMyProfileCheckbox: No button found');
+      console.error('insertMyProfileInfo: No button found');
       return;
     }
 
     let wrapper = document.querySelector('#includeMyProfile');
+    let wrapperClassName =
+      'AIPRM__mt-4 AIPRM__pl-10 AIPRM__pr-10 AIPRM__-mb-1.5 AIPRM__text-right AIPRM__whitespace-nowrap';
 
     // Create the wrapper if it doesn't exist
     if (!wrapper) {
       wrapper = document.createElement('div');
-      wrapper.className = 'AIPRM__mt-4';
+      wrapper.className = wrapperClassName;
       wrapper.id = 'includeMyProfile';
 
       // Insert the wrapper after the submit button
@@ -4330,26 +4461,116 @@ ${textContent}
     }
 
     // Hide for not linked accounts
-    wrapper.className = 'AIPRM__mt-4';
+    wrapper.className = wrapperClassName;
     if (!this.Client.User.IsLinked) {
       wrapper.className = 'AIPRM__hidden';
-      this.IncludeMyProfileMessage = false;
+      this.SelectedMyProfileInfoID = null;
     }
 
     // Insert the checkbox
     wrapper.innerHTML = /*html*/ `
-      <label class="AIPRM__text-sm AIPRM__flex AIPRM__items-center AIPRM__mx-2 sm:AIPRM__mx-0"
+      <label class="AIPRM__text-sm AIPRM__items-center AIPRM__mx-2"
         title="Include provided &quot;My Profile&quot; info that you would like ChatGPT to know and remember about you and your preferences.">
         <input name="includeMyProfile" type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
-          ${this.IncludeMyProfileMessage ? 'checked' : ''} />
-        Include <a class="AIPRM__underline AIPRM__mx-1 AIPRM__cursor-pointer" title="Edit Your Profile" onclick="event.preventDefault(); AIPRM.showAccountModal();">My Profile info</a>
+          ${this.IncludeMyProfileMessage ? 'checked' : ''} ${
+      this.MyProfileInfos.length > 0 ? '' : 'disabled'
+    } />
+        Include <a class="AIPRM__underline AIPRM__cursor-pointer" title="Manage My Profile Info" href="${AppAccountURL}#myprofileinfo" target="_blank">My Profile Info</a>:
       </label>
-    `;
 
-    // Add event listener to checkbox to update the include my profile info on change
+      <div id="includeMyProfileInfoSelectWrapper" class="AIPRM__inline-block AIPRM__group">
+        <select id="includeMyProfileInfoSelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded dark:AIPRM__bg-gray-600 dark:AIPRM__border-gray-600 dark:group-hover:AIPRM__bg-gray-900 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white group-hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 sm:AIPRM__max-w-xs AIPRM__max-w-[6rem] ${
+          !this.MyProfileInfos.length ? 'AIPRM__pointer-events-none' : ''
+        }" 
+          ${this.IncludeMyProfileMessage ? '' : 'disabled'}>
+          ${
+            this.MyProfileInfos.length > 0
+              ? this.MyProfileInfos.map(
+                  (myProfileInfo) => `
+            <option value="${myProfileInfo.ID}" ${
+                    myProfileInfo.ID === this.SelectedMyProfileInfoID
+                      ? 'selected'
+                      : ''
+                  }>
+              ${sanitizeInput(myProfileInfo.Label)}
+            </option> 
+          `
+                ).join('')
+              : `<option value="" selected disabled>No Profile Info found</option>`
+          }
+        </select>
+      </div>
+     `;
+
+    const selectWrapper = wrapper.querySelector(
+      '#includeMyProfileInfoSelectWrapper'
+    );
+
+    // add on click event listener to includeMyProfileInfoSelectWrapper if there are no options, otherwise remove it
+    if (!this.MyProfileInfos.length) {
+      selectWrapper.addEventListener('click', this.openMyProfileInfoSettings);
+    } else {
+      selectWrapper.removeEventListener(
+        'click',
+        this.openMyProfileInfoSettings
+      );
+    }
+
+    const includeMyProfileInfoSelect = wrapper.querySelector(
+      '#includeMyProfileInfoSelect'
+    );
+
     wrapper.querySelector('input').addEventListener('change', (event) => {
       this.IncludeMyProfileMessage = event.target.checked;
+
+      if (this.IncludeMyProfileMessage && this.MyProfileInfos.length > 0) {
+        if (includeMyProfileInfoSelect.value === '') {
+          this.SelectedMyProfileInfoID = this.MyProfileInfos[0].ID;
+          includeMyProfileInfoSelect.value = this.SelectedMyProfileInfoID;
+        }
+
+        this.SelectedMyProfileInfoID = parseInt(
+          includeMyProfileInfoSelect.value
+        );
+
+        includeMyProfileInfoSelect.disabled = false;
+      } else {
+        includeMyProfileInfoSelect.disabled = true;
+      }
+
+      try {
+        localStorage.setItem(
+          includeMyProfileInfoKey,
+          this.IncludeMyProfileMessage
+        );
+        localStorage.setItem(
+          selectedMyProfileInfoKey,
+          this.SelectedMyProfileInfoID
+        );
+      } catch (error) {
+        console.error(error);
+      }
     });
+
+    // Add event listener to checkbox to update the include my profile info on change
+    includeMyProfileInfoSelect.addEventListener('change', (event) => {
+      this.SelectedMyProfileInfoID = parseInt(event.target.value);
+
+      try {
+        localStorage.setItem(
+          selectedMyProfileInfoKey,
+          this.SelectedMyProfileInfoID
+        );
+      } catch (error) {
+        console.error(error);
+      }
+    });
+  },
+
+  openMyProfileInfoSettings(event) {
+    event.stopPropagation();
+
+    window.open(`${AppAccountURL}#myprofileinfo`, '_blank');
   },
 
   insertVariablesInputWrapper() {
@@ -4470,8 +4691,9 @@ ${textContent}
     // Dispatch the input event to trigger the event listeners and enable the "Submit" button
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
 
-    // select button element which is in form and it's direct next sibling of textarea
-    let button = textarea.nextElementSibling;
+    // select last button element for parent element of textarea
+    let buttons = textarea.parentElement.querySelectorAll('button');
+    let button = buttons && buttons.length ? buttons[buttons.length - 1] : null;
 
     // Enable button if it's disabled
     if (button.disabled) {
@@ -5645,14 +5867,12 @@ ${textContent}
   },
 
   // Check if prompt template is hidden
-  async isHidden(idx) {
+  async isHidden(prompt) {
     const list = this.Lists.getHidden();
 
     if (!list) {
       return false;
     }
-
-    const prompt = (await this.getCurrentPromptTemplates())[idx];
 
     return await list.has(prompt);
   },
@@ -5773,7 +5993,10 @@ ${textContent}
   async addToList(idx) {
     const prompt = (await this.getCurrentPromptTemplates())[idx];
 
-    const lists = this.Lists.getCustomWithWriteAccess(this.Client.UserQuota);
+    const lists = this.Lists.getCustomWithWriteAccess(
+      this.Client.UserQuota,
+      this.Client.UserTeamM
+    );
 
     const AIPRMVerifiedList = this.Lists.getAIPRMVerified();
 
@@ -6540,7 +6763,10 @@ ${textContent}
                         ${
                           this.Client.User.IsLinked
                             ? /*html*/ `
-                              <button class="AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-red-500 hover:AIPRM__border-red-700 AIPRM__text-red-500 hover:AIPRM__text-red-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-red-400 dark:hover:AIPRM__border-red-400" onclick="AIPRM.disconnectAccount()">
+                              <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}" target="_blank">
+                                View Account
+                              </a>
+                              <button class="AIPRM__block sm:AIPRM__inline-block sm:AIPRM__ml-2 AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-red-500 hover:AIPRM__border-red-700 AIPRM__text-red-500 hover:AIPRM__text-red-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-red-400 dark:hover:AIPRM__border-red-400" onclick="AIPRM.disconnectAccount()">
                                 Disconnect
                               </button>
                             `
@@ -6550,19 +6776,6 @@ ${textContent}
                               </a>
                             `
                         }
-                      </dd>
-                    </div>
-
-                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
-                      <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">AIPRM Plan Level</dt>
-                      <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
-                        <div>
-                          ${this.Client.UserQuota.getMaxPlanLevelLabel()}
-                        </div>
-
-                        <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppPricingURL}" target="_blank">
-                          Upgrade
-                        </a>
                       </dd>
                     </div>
 
@@ -6578,19 +6791,47 @@ ${textContent}
                       </dd>
                     </div>
 
-                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col">
-                      <dt class="AIPRM__w-full AIPRM__py-2 AIPRM__font-medium">My Profile</dt>
-                      <dd class="AIPRM__w-full AIPRM__py-2 AIPRM__justify-between">
-                        <div class="AIPRM__text-right">
-                          <textarea name="MyProfileMessage" class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 120px;" title="Please provide any information that you would like ChatGPT to know and remember about you and your preferences."
-                          placeholder="Please provide any information that you would like ChatGPT to know and remember about you and your preferences." maxlength="2048">${sanitizeInput(
-                            this.getProfileMessage()
-                          )}</textarea>
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
+                      <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">AIPRM Teams</dt>
+                      <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
+                          <a class="AIPRM__inline-block AIPRM__mt-1 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppTeamURL}" target="_blank">
+                            Manage My Teams
+                          </a>
+                      </dd>
+                    </div>
 
-                          <button class="AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" onclick="AIPRM.saveProfileMessage()">
-                            Save Profile
-                          </button>
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
+                      <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">AIPRM Plan Level</dt>
+                      <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
+                        <div>
+                          ${this.Client.UserQuota.getMaxPlanLevelLabel()}
                         </div>
+
+                        <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppPricingURL}" target="_blank">
+                          Upgrade
+                        </a>
+                      </dd>
+                    </div>                    
+
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
+                      <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">My Profile Info</dt>
+                      <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
+                        <a class="AIPRM__inline-block AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}#myprofileinfo" target="_blank">
+                          Manage My Profile Info
+                        </a>
+                      </dd>
+                    </div>
+
+                    <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row">
+                      <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">Settings</dt>
+                      <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
+                        <label class="AIPRM__text-sm AIPRM__flex AIPRM__items-center" id="savePromptForm-public-checkbox">
+                          <input id="accountModal-hideWatermark" type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
+                            onchange="AIPRM.toggleHideAIPRMWatermark()" ${
+                              this.getHideWatermark() ? 'checked' : ''
+                            }> 
+                          Hide AIPRM Watermark
+                        </label>
                       </dd>
                     </div>
 
@@ -6681,36 +6922,40 @@ ${textContent}
   },
 
   // Get the user's profile message from localStorage
-  getProfileMessage() {
-    return localStorage.getItem(myProfileMessageKey) || '';
+  getHideWatermark() {
+    if (!this.Client.UserQuota.canUseHideWatermark(false)) {
+      return '';
+    }
+
+    return localStorage.getItem(hideWatermarkKey) || '';
   },
 
-  // Save the user's profile message to localStorage
-  saveProfileMessage() {
-    try {
-      localStorage.setItem(
-        myProfileMessageKey,
-        document.querySelector('textarea[name="MyProfileMessage"]').value
-      );
-    } catch (error) {
-      this.showNotification(
-        NotificationSeverity.ERROR,
-        'Could not save your profile, please try again later.',
-        false
-      );
+  toggleHideAIPRMWatermark() {
+    const checkbox = document.getElementById('accountModal-hideWatermark');
 
+    // check if user can use hide watermark
+    if (!this.Client.UserQuota.canUseHideWatermark()) {
+      checkbox.checked = false;
       return;
     }
 
-    // show notification
-    this.showNotification(
-      NotificationSeverity.SUCCESS,
-      'Your profile has been saved successfully.'
-    );
+    // update local storage
+    try {
+      localStorage.setItem(hideWatermarkKey, checkbox.checked ? 'true' : '');
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not update Hide AIPRM Watermark setting, please try again later.',
+        false
+      );
+
+      checkbox.checked = false;
+      return;
+    }
   },
 
   // Reset the option to include the user's profile message
-  resetIncludeMyProfileMessage() {
+  resetIncludeMyProfileInfo() {
     // reset the flag
     this.IncludeMyProfileMessage = false;
 

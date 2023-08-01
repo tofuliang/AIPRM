@@ -18,10 +18,6 @@ export class Lists {
    */
   constructor(lists = []) {
     this.lists = lists;
-
-    if (this.lists.length > 1) {
-      this.lists.sort(this.sortLists);
-    }
   }
 
   /**
@@ -38,8 +34,8 @@ export class Lists {
         return 1;
       } else {
         if (a.ListTypeNo === ListTypeNo.TEAM_CUSTOM) {
-          const aOwner = a.IsTeamListOwner();
-          const bOwner = b.IsTeamListOwner();
+          const aOwner = a.IsTeamListWriteAccess();
+          const bOwner = b.IsTeamListWriteAccess();
 
           if (aOwner && !bOwner) {
             return -1;
@@ -70,6 +66,13 @@ export class Lists {
     }
   }
 
+  // Sort lists
+  sort() {
+    if (this.lists.length > 1) {
+      this.lists.sort(this.sortLists);
+    }
+  }
+
   /**
    * Add list to collection
    *
@@ -78,9 +81,7 @@ export class Lists {
   add(list) {
     this.lists.push(list);
 
-    if (this.lists.length > 1) {
-      this.lists.sort(this.sortLists);
-    }
+    this.sort();
   }
 
   /**
@@ -168,12 +169,16 @@ export class Lists {
    * Get "Custom" lists with write access for user
    *
    * @param {UserQuota} userQuota
+   * @param {import("./client").UserTeamM} userTeamM
    * @returns {List[]}
    */
-  getCustomWithWriteAccess(userQuota) {
+  getCustomWithWriteAccess(userQuota, userTeamM) {
     if (userQuota?.hasTeamsFeatureEnabled()) {
       return this.lists.filter(
-        (list) => list.is(ListTypeNo.CUSTOM) || (list.is(ListTypeNo.TEAM_CUSTOM) && list.IsTeamListOwner())
+        (list) =>
+          list.is(ListTypeNo.CUSTOM) ||
+          (list.is(ListTypeNo.TEAM_CUSTOM) &&
+            list.HasWriteAccessForTeamMember(userTeamM))
       );
     } else {
       return this.lists.filter((list) => list.is(ListTypeNo.CUSTOM));
@@ -290,14 +295,18 @@ export class List {
     return this.list.ForTeamID;
   }
 
-  IsTeamListOwner() {
+  IsTeamListWriteAccess() {
     if (this.list.ListTypeNo === ListTypeNo.CUSTOM) {
       return false;
     }
 
     const team = this.client.UserTeamM?.get(this.list.ForTeamID);
     if (team) {
-      return team.MemberRoleNo === MemberRoleNo.OWNER;
+      return (
+        team.MemberRoleNo === MemberRoleNo.OWNER ||
+        team.MemberRoleNo === MemberRoleNo.ADMIN ||
+        team.MemberRoleNo === MemberRoleNo.READ_WRITE
+      );
     }
 
     return false;
@@ -310,8 +319,13 @@ export class List {
    * @returns {boolean}
    */
   HasWriteAccessForTeamMember(userTeamM) {
+    const role = userTeamM?.get(this.list.ForTeamID)?.MemberRoleNo;
+
     return (
-      userTeamM?.get(this.list.ForTeamID)?.MemberRoleNo === MemberRoleNo.OWNER
+      role &&
+      (role === MemberRoleNo.OWNER ||
+        role === MemberRoleNo.ADMIN ||
+        role === MemberRoleNo.READ_WRITE)
     );
   }
 
@@ -322,9 +336,19 @@ export class List {
    * @returns {boolean}
    */
   HasAdminAccessForTeamMember(userTeamM) {
-    return (
-      userTeamM?.get(this.list.ForTeamID)?.MemberRoleNo === MemberRoleNo.OWNER
-    );
+    const role = userTeamM?.get(this.list.ForTeamID)?.MemberRoleNo;
+    return role && (role === MemberRoleNo.OWNER || role === MemberRoleNo.ADMIN);
+  }
+
+  /**
+   * Checks if user has owner access to list
+   *
+   * @param {import("./client").UserTeamM} userTeamM
+   * @returns {boolean}
+   */
+  HasOwnerAccessForTeamMember(userTeamM) {
+    const role = userTeamM?.get(this.list.ForTeamID)?.MemberRoleNo;
+    return role && role === MemberRoleNo.OWNER;
   }
 
   /**
@@ -371,7 +395,11 @@ export class List {
 
   // Delete list via API
   async delete() {
-    await this.client.deleteList(this.list.ID);
+    await this.client.deleteList(
+      this.list.ID,
+      this.list.ListTypeNo,
+      this.list.ForTeamID
+    );
   }
 
   /**
@@ -488,6 +516,10 @@ export class List {
 
         if (team.MemberRoleNo === MemberRoleNo.OWNER) {
           title = title + ' (Owner)';
+        } else if (team.MemberRoleNo === MemberRoleNo.ADMIN) {
+          title = title + ' (Admin)';
+        } else if (team.MemberRoleNo === MemberRoleNo.READ_WRITE) {
+          title = title + ' (Read-Write)';
         } else {
           title = title + ' (Read-Only)';
         }
