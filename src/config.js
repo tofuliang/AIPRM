@@ -123,7 +123,7 @@ export {
 
 /** @typedef {{Enabled: boolean, Config: {Selectors: Object.<string, string>}} WatermarkConfig */
 
-/** @typedef {{FirstPrompt: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string, ShareButton: string}} SelectorConfig */
+/** @typedef {{FirstPrompt: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string, ShareButton: string, SuggestedPrompts: string}} SelectorConfig */
 
 /** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig}, Selectors: SelectorConfig}} RemoteConfig */
 

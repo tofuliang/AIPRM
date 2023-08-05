@@ -1714,6 +1714,33 @@ ${textContent}
 
       this.insertPromptTemplatesSidebar();
     }
+
+    // Hide suggested prompts conflicting with prompt templates
+    this.hideSuggestedPrompts();
+  },
+
+  // Check if the there are suggested prompts and hide them
+  hideSuggestedPrompts() {
+    const selectorConfig = this.Config.getSelectorConfig();
+
+    const suggestedPrompts = document.querySelector(
+      selectorConfig.SuggestedPrompts
+    );
+
+    // No suggested prompts found
+    if (!suggestedPrompts) {
+      return;
+    }
+
+    // Check if it's conversation page, because otherwise the "Regenerate" button would be hidden, too
+    const isConversationPage =
+      document.querySelector(selectorConfig.ConversationResponse) ||
+      document.querySelector(selectorConfig.FirstPrompt);
+
+    // Add class AIPRM__hidden to the suggested prompts in case it's not conversation page, otherwise remove it
+    isConversationPage
+      ? suggestedPrompts.classList.remove('AIPRM__hidden')
+      : suggestedPrompts.classList.add('AIPRM__hidden');
   },
 
   // Add AIPRM sidebar icon and sidebar with prompt templates
