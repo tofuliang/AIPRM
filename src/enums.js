@@ -57,6 +57,10 @@ const UsageTypeNo = {
   SAVE: 16,
   UPDATE: 32,
   DELETE: 64,
+  LIVE_CRAWLING: 128,
+  VIEW_SOURCE: 256,
+  FORK: 512,
+  EXPORT: 1024,
 };
 
 /** @enum {number} */
@@ -77,7 +81,7 @@ const SortModeNo = {
   TOP_VOTES_TRENDING: 2,
   TOP_VOTES_ABSOLUTE: 16,
   TOP_VIEWS: 1,
-  LATEST_UPDATES: 4
+  LATEST_UPDATES: 4,
 };
 
 /** @enum {number} */
@@ -207,6 +211,12 @@ const ModelStatusNo = {
   DEPRECATED: 2,
 };
 
+/** @enum {string} */
+const LayoutChangeType = {
+  GENERAL: 'General',
+  PROMPT_TEMPLATES: 'PromptTemplates',
+};
+
 export {
   PromptTemplatesType,
   NotificationSeverity,
@@ -231,4 +241,5 @@ export {
   FeatureBitset,
   PromptFeatureBitset,
   ModelStatusNo,
+  LayoutChangeType,
 };

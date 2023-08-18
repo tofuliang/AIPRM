@@ -45,6 +45,7 @@ import {
   PromptFeatureBitset,
   ExternalSystemNo,
   ModelStatusNo,
+  LayoutChangeType,
 } from './enums.js';
 /* eslint-enable */
 
@@ -489,6 +490,13 @@ window.AIPRM = {
       !message.includes(CrawledSourcePlaceholder)
     ) {
       return message;
+    }
+
+    if (this.SelectedPromptTemplate?.ID) {
+      this.Client.usePrompt(
+        this.SelectedPromptTemplate.ID,
+        UsageTypeNo.LIVE_CRAWLING
+      );
     }
 
     // check if live crawling is enabled
@@ -1717,6 +1725,29 @@ ${textContent}
 
     // Hide suggested prompts conflicting with prompt templates
     this.hideSuggestedPrompts();
+
+    // Apply general layout changes based on config
+    this.applyLayoutChanges();
+  },
+
+  // Apply layout changes based on config and type (general or specific only)
+  applyLayoutChanges(type = LayoutChangeType.GENERAL) {
+    const layoutChanges = this.Config.getLayoutChangesConfig()?.[type] || [];
+
+    // Apply layout changes (query using "Selector" property, "Remove" to remove classes, "Add" to add classes)
+    layoutChanges.forEach((layoutChange) => {
+      const elements = document.querySelectorAll(layoutChange.Selector);
+
+      elements.forEach((element) => {
+        if (layoutChange.Remove?.length > 0) {
+          element.classList.remove(...layoutChange.Remove);
+        }
+
+        if (layoutChange.Add?.length > 0) {
+          element.classList.add(...layoutChange.Add);
+        }
+      });
+    });
   },
 
   // Check if the there are suggested prompts and hide them
@@ -2927,8 +2958,10 @@ ${textContent}
       return;
     }
 
+    const selectorConfig = this.Config.getSelectorConfig();
+
     // Get the title element (as a reference point and also for some alteration)
-    const title = document.querySelector('h1.text-4xl');
+    const title = document.querySelector(selectorConfig.DashboardTitle);
 
     // If there is no title element, return
     if (!title) {
@@ -2948,7 +2981,7 @@ ${textContent}
 
     // Make sure the model selector is not sticky (to avoid overlapping with the prompt templates)
     const modelSelector = document.querySelector(
-      this.Config.getSelectorConfig().ModelSelectorContainer || null
+      selectorConfig.ModelSelectorContainer || null
     );
 
     if (modelSelector) {
@@ -2991,14 +3024,8 @@ ${textContent}
       return;
     }
 
-    // Remove 'md:h-full', 'md:max-w-2xl', 'lg:max-w-3xl' classes from the parent element (to make it full width)
-    parent.classList.remove('md:h-full', 'md:max-w-2xl', 'lg:max-w-3xl');
-
-    // Remove 'flex' from the parent element (to avoid overlapping of the prompt templates and model selector)
-    parent.classList.remove('flex');
-
-    // Add 'AIPRM__w-full' class to the parent element (to make it full width)
-    parent.classList.add('AIPRM__w-full');
+    // Apply prompt templates specific layout changes
+    this.applyLayoutChanges(LayoutChangeType.PROMPT_TEMPLATES);
 
     const isSidebarView = parent.id?.includes('AIPRM__sidebar-container');
 
@@ -4799,6 +4826,9 @@ ${textContent}
 
   // Export the current chat log to a file
   exportCurrentChat() {
+    // unknown prompt ID - use hardcoded prompt ID = UsageTypeNo.EXPORT
+    this.Client.usePrompt(`${UsageTypeNo.EXPORT}`, UsageTypeNo.EXPORT);
+
     const selectorConfig = this.Config.getSelectorConfig();
 
     const blocks = [
@@ -5723,6 +5753,8 @@ ${textContent}
       }
     }
 
+    this.Client.usePrompt(prompt.ID, UsageTypeNo.VIEW_SOURCE);
+
     await this.showViewPromptModal(idx);
 
     // Pre-fill the prompt template modal with the prompt template
@@ -5741,6 +5773,8 @@ ${textContent}
 
   async forkToPrivatePrompt(idx) {
     const promptOriginal = (await this.getCurrentPromptTemplates())[idx];
+
+    this.Client.usePrompt(promptOriginal.ID, UsageTypeNo.FORK);
 
     await this.showSavePromptModal();
 

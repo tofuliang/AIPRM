@@ -6,7 +6,7 @@ const getEnvironmentConfig = () => {
   switch (currentEnvironment) {
     case 'production':
       return {
-        APIEndpoint: 'https://api.aiprm.com/api4',
+        APIEndpoint: 'https://api.aiprm.com/api5',
         APIEndpointAPP: 'https://app1.aiprm.com/api',
         AppAccountURL: 'https://app1.aiprm.com/account',
         AppPricingURL: 'https://app1.aiprm.com/pricing',
@@ -33,7 +33,7 @@ const getEnvironmentConfig = () => {
       };
     default:
       return {
-        APIEndpoint: 'https://api.aiprm.com/api4',
+        APIEndpoint: 'https://api.aiprm.com/api5',
         APIEndpointAPP: 'https://app1.aiprm.com/api',
         AppAccountURL: 'https://app1.aiprm.com/account',
         AppPricingURL: 'https://app1.aiprm.com/pricing',
@@ -123,9 +123,13 @@ export {
 
 /** @typedef {{Enabled: boolean, Config: {Selectors: Object.<string, string>}} WatermarkConfig */
 
-/** @typedef {{FirstPrompt: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string, ShareButton: string, SuggestedPrompts: string}} SelectorConfig */
+/** @typedef {{FirstPrompt: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string, ShareButton: string, SuggestedPrompts: string, DashboardTitle: string}} SelectorConfig */
 
-/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig}, Selectors: SelectorConfig}} RemoteConfig */
+/** @typedef {{Selector: string, Add: string[], Remove: string[]}} LayoutChangeConfig */
+
+/** @typedef {{PromptTemplates: LayoutChangeConfig[], General: LayoutChangeConfig[]}} LayoutChangesConfig */
+
+/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig}, Selectors: SelectorConfig, LayoutChanges: LayoutChangesConfig}} RemoteConfig */
 
 export class Config {
   /** @type {RemoteConfig} */
@@ -159,5 +163,10 @@ export class Config {
   /** @returns {SelectorConfig} */
   getSelectorConfig() {
     return this.#config.Selectors;
+  }
+
+  /** @returns {LayoutChangesConfig} */
+  getLayoutChangesConfig() {
+    return this.#config.LayoutChanges;
   }
 }
