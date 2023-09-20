@@ -197,7 +197,7 @@ const modelMultiselectOptions = {
 
 window.AIPRM = {
   // Save a reference to the original fetch function
-  fetch: (window._fetch = window._fetch || window.fetch),
+  fetch: (window._fetch = window._fetch || window.fetch.bind(window)),
 
   CacheBuster: btoa(new Date().toISOString().slice(0, 16).toString()),
 
