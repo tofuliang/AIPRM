@@ -289,7 +289,15 @@ export class UserQuota {
       (key) => PlanLevelNo[key] === this.#quota.MaxLevel
     );
 
-    return maxPlanLevel ? `AIPRM ${maxPlanLevel}` : 'Unknown';
+    if (maxPlanLevel) {
+      return (
+        'AIPRM ' +
+        maxPlanLevel[0].toUpperCase() +
+        maxPlanLevel.slice(1).toLowerCase()
+      );
+    } else {
+      return 'Unknown';
+    }
   }
 
   hasPaidPlan() {

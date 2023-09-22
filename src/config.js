@@ -70,6 +70,8 @@ const WritingStyleFeedURL =
 const ContinueActionsFeedURL =
   'https://api.aiprm.com/csv/continue_actions-20230216.csv?v=';
 const ModelFeedURL = 'https://api.aiprm.com/csv/models-20230612.csv?v=';
+const PromptBuilderFeedURL =
+  'https://api.aiprm.com/csv/prompt_builder-20230811.csv?v=';
 const EndpointConversation = 'https://chat.openai.com/backend-api/conversation';
 const AppShort = 'AIPRM';
 const AppName = 'AIPRM for ChatGPT';
@@ -109,6 +111,7 @@ export {
   WritingStyleFeedURL,
   ContinueActionsFeedURL,
   ModelFeedURL,
+  PromptBuilderFeedURL,
   APIEndpointAPP,
   AppAccountURL,
   AppCommunityForumURL,

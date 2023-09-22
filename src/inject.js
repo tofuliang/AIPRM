@@ -27,12 +27,12 @@ import {
   WritingStyleFeedURL,
   AppTeamURL,
   AppPricingURL,
+  PromptBuilderFeedURL,
 } from './config.js';
 
 /* eslint-disable no-unused-vars */
 import {
   ListTypeNo,
-  MemberRoleNo,
   MessageVoteTypeNo,
   NotificationSeverity,
   PromptTemplatesType,
@@ -46,6 +46,7 @@ import {
   ExternalSystemNo,
   ModelStatusNo,
   LayoutChangeType,
+  CreatePromptMode,
 } from './enums.js';
 /* eslint-enable */
 
@@ -67,6 +68,7 @@ import {
 } from './utils.js';
 
 import { MultiselectDropdown } from './multiselect-dropdown.js';
+import { PromptBuilder } from './prompt-builder.js';
 
 /**
  * @typedef {Object} PromptVariable
@@ -129,6 +131,7 @@ const lastTargetLanguageKey = 'lastTargetLanguage';
 const lastPageSizeKey = 'lastPageSize';
 const lastPromptTemplateTypeKey = 'lastPromptTemplateType';
 const lastListIDKey = 'lastListID';
+const lastCreatePromptModeKey = 'lastCreatePromptMode';
 
 const myProfileMessageKey = 'myProfileMessageAIPRM';
 const hideWatermarkKey = 'AIPRM_hideWatermark';
@@ -144,6 +147,8 @@ const pageSizeOptions = [4, 8, 12, 16, 20];
 const pageSizeDefault = 12;
 
 const editPromptTemplateEvent = 'editPromptTemplate';
+const forkPromptTemplateEvent = 'forkPromptTemplate';
+const clonePromptTemplateEvent = 'clonePromptTemplate';
 
 const variableWrapperID = 'AIPRM__variable-wrapper';
 const variableIDPrefix = 'AIPRM__VARIABLE';
@@ -275,6 +280,12 @@ window.AIPRM = {
   /** @type {Model[]} */
   ModelsActive: [],
 
+  /** @type {PromptBuilder} */
+  PromptBuilder: null,
+
+  /** @type {import('./prompt-builder.js').PromptBuilderOptions} */
+  PromptBuilderOptions: {},
+
   /** @type {Lists} */
   Lists: new Lists(),
 
@@ -349,6 +360,7 @@ window.AIPRM = {
       this.fetchLanguages(),
       this.fetchMessages(false),
       this.fetchModels(),
+      this.fetchPromptBuilderConfig(),
       clientInitialized ? Promise.resolve() : this.Client.init(),
     ]);
 
@@ -362,6 +374,9 @@ window.AIPRM = {
     if (!this.Client.UserQuota.connectAccountAnnouncement()) {
       this.showMessages();
     }
+
+    // Preset default CreatePromptMode based on existing or new user
+    this.setDefaultCreatePromptMode();
 
     this.loadPromptTemplateTypeAndListFromLocalStorage();
 
@@ -408,6 +423,30 @@ window.AIPRM = {
     this.addWatermark();
 
     this.setupFavoritePromptsContextMenu();
+  },
+
+  // Preset default create prompt mode based on existing (advanced) or new user (basic)
+  setDefaultCreatePromptMode() {
+    // Check if the lastPromptTemplateType is set in localStorage
+    const lastPromptTemplateType = localStorage.getItem(
+      lastPromptTemplateTypeKey
+    );
+
+    // If it's not set, then we default to simple mode (new user)
+    if (!lastPromptTemplateType || lastPromptTemplateType === '') {
+      return;
+    }
+
+    // Get the last create prompt mode
+    const lastCreatePromptMode = localStorage.getItem(lastCreatePromptModeKey);
+
+    // If it's set and not empty, then we won't change it
+    if (lastCreatePromptMode && lastCreatePromptMode !== '') {
+      return;
+    }
+
+    // If it's not set or it's empty, then we default to advanced mode (existing user)
+    localStorage.setItem(lastCreatePromptModeKey, CreatePromptMode.ADVANCED);
   },
 
   // add prompts from "Favorites" Prompts to context menu
@@ -1302,6 +1341,73 @@ ${textContent}
     );
   },
 
+  // Fetch list roles, tasks, constraints and contexts for prompt builder config from a remote CSV file
+  fetchPromptBuilderConfig() {
+    const options = {
+      roles: [],
+      tasks: [],
+      constraints: [],
+      contexts: [],
+    };
+
+    return (
+      this.fetch(PromptBuilderFeedURL + this.CacheBuster)
+        // Convert the response to text
+        .then((res) => res.text())
+        // Convert the CSV text to an array of records
+        .then((csv) => this.CSVToArray(csv))
+        // Map the records to prompt builder options (roles, tasks, constraints and contexts) - ignore header "Type","Label"
+        .then((records) => {
+          return (
+            records
+              .map(([Type, Label]) => {
+                return { Type, Label };
+              })
+              // Filter out records that do not have a Type, or it is the header row (with "Type" as its title)
+              .filter(({ Type }) => Type && Type !== 'Type')
+          );
+        })
+        .then((promptBuilderOptions) => {
+          // collect prompt builder options (roles, tasks, constraints and contexts)
+          promptBuilderOptions.forEach((option) => {
+            switch (option.Type) {
+              case 'role':
+                options.roles.push(option.Label);
+                break;
+              case 'task':
+                options.tasks.push(option.Label);
+                break;
+              case 'constraint':
+                options.constraints.push(option.Label);
+                break;
+              case 'context':
+                options.contexts.push(option.Label);
+                break;
+            }
+          });
+        })
+        .then(() => {
+          // sort the prompt builder options (roles, tasks, constraints and contexts) by Label in a case-insensitive manner
+          options.roles.sort((a, b) =>
+            a.toLowerCase().localeCompare(b.toLowerCase())
+          );
+          options.tasks.sort((a, b) =>
+            a.toLowerCase().localeCompare(b.toLowerCase())
+          );
+          options.constraints.sort((a, b) =>
+            a.toLowerCase().localeCompare(b.toLowerCase())
+          );
+          options.contexts.sort((a, b) =>
+            a.toLowerCase().localeCompare(b.toLowerCase())
+          );
+        })
+        .then(() => {
+          // save the prompt builder options (roles, tasks, constraints and contexts)
+          this.PromptBuilderOptions = options;
+        })
+    );
+  },
+
   // Load Prompt Templates type and list ID from local storage
   loadPromptTemplateTypeAndListFromLocalStorage() {
     const lastPromptTemplateType = localStorage.getItem(
@@ -1931,9 +2037,10 @@ ${textContent}
    * Validate prompt template before saving
    *
    * @param {Prompt} prompt
+   * @param {CreatePromptMode} currentCreatePromptMode
    * @returns {boolean} true if prompt is valid
    */
-  validatePrompt(prompt) {
+  validatePrompt(prompt, currentCreatePromptMode) {
     const errors = [];
 
     // find existing prompt based on ID in PromptTemplates or OwnPrompts
@@ -2047,7 +2154,11 @@ ${textContent}
     // there is at least one missing placeholder
     if (missingPlaceholders.length > 0) {
       errors.push(
-        `
+        currentCreatePromptMode === CreatePromptMode.BASIC
+          ? `
+          Please fill out all colored fields to create a prompt template.
+          `
+          : `
           Make sure you follow the Prompt Template guidelines. <br>
           You must use ${missingPlaceholders.join(' and ')} correctly. <br><br>
           Learn more <a class="AIPRM__underline" href="https://lrt.li/aiprmpromptguide" target="_blank" rel="noopener noreferrer">here</a>.
@@ -2074,6 +2185,15 @@ ${textContent}
   async savePromptAsTemplate(e) {
     e.preventDefault();
 
+    // if it's basic mode -> build prompt template first (input with name createPromptMode in savePromptForm)
+    const currentCreatePromptMode = document.querySelector(
+      'input[name="createPromptMode"]:checked'
+    ).value;
+
+    if (currentCreatePromptMode === CreatePromptMode.BASIC) {
+      this.buildBasicPrompt();
+    }
+
     /** @type Prompt */
     const prompt = {
       ModelS: [],
@@ -2097,7 +2217,7 @@ ${textContent}
     // re-check user status
     await this.Client.checkUserStatus();
 
-    if (!this.validatePrompt(prompt)) {
+    if (!this.validatePrompt(prompt, currentCreatePromptMode)) {
       return;
     }
 
@@ -2108,6 +2228,16 @@ ${textContent}
 
       // Update revision time to current time
       prompt.RevisionTime = new Date().toISOString();
+
+      // track usage (creation of new prompt template)
+      if (!prompt.ID) {
+        this.Client.usePrompt(
+          savedPrompt.ID,
+          currentCreatePromptMode === CreatePromptMode.BASIC
+            ? UsageTypeNo.CREATE_BASIC
+            : UsageTypeNo.CREATE_ADVANCED
+        );
+      }
 
       // Update existing prompt template
       if (prompt.ID) {
@@ -2137,6 +2267,18 @@ ${textContent}
         this.Client.UserQuota.promptQuotaExceeded();
 
         return;
+      }
+
+      // switch to advanced mode if there was an error and the current mode is basic,
+      // to allow the user to fix the error
+      if (currentCreatePromptMode === CreatePromptMode.BASIC) {
+        const advancedModeInput = document.getElementById(
+          'createPromptModeAdvanced'
+        );
+        advancedModeInput.checked = true;
+
+        // trigger the onchange event on the radio button to switch to advanced mode
+        advancedModeInput.dispatchEvent(new Event('change'));
       }
 
       this.showNotification(
@@ -2507,7 +2649,14 @@ ${textContent}
           severityClassName[severity]
         } AIPRM__flex AIPRM__flex-row AIPRM__inline-flex AIPRM__pointer-events-auto AIPRM__px-6 AIPRM__py-3 AIPRM__rounded-md AIPRM__text-white" role="alert">
           <div class="AIPRM__flex AIPRM__gap-4">
-            <p class="AIPRM__max-w-md" style="overflow-wrap: anywhere;">${message}</p>
+            <div>
+              <p class="AIPRM__max-w-md" style="overflow-wrap: anywhere;">${message}</p>
+              ${
+                severity === NotificationSeverity.ERROR
+                  ? /*html*/ `<br/><p class="AIPRM__max-w-md AIPRM__font-semibold" style="overflow-wrap: anywhere;">If this issue persists, please check <a href="https://forum.aiprm.com/" target="_blank" class="AIPRM__underline">forum.aiprm.com</a> and <a href="https://status.aiprm.com/" target="_blank" class="AIPRM__underline">status.aiprm.com</a> for updates.</p>`
+                  : ''
+              }
+            </div>
             <button>${svg('Cross')}</button>
           </div>
         </div>
@@ -2574,7 +2723,14 @@ ${textContent}
     }
 
     // get the prompt template from current chat log if showSavePromptModal was called from "Save prompt as template" button (with event)
-    if (e && e.type !== editPromptTemplateEvent) {
+    if (
+      e &&
+      ![
+        editPromptTemplateEvent,
+        forkPromptTemplateEvent,
+        clonePromptTemplateEvent,
+      ].includes(e.type)
+    ) {
       // get the element that triggered this onclick event
       const button = e.target.closest('button');
 
@@ -2604,152 +2760,249 @@ ${textContent}
       document.body.appendChild(savePromptModal);
     }
 
+    let lastCreatePromptMode = localStorage.getItem(lastCreatePromptModeKey);
+
+    // last create prompt mode from localStorage or default to basic
+    lastCreatePromptMode =
+      lastCreatePromptMode &&
+      [CreatePromptMode.BASIC, CreatePromptMode.ADVANCED].includes(
+        lastCreatePromptMode
+      )
+        ? lastCreatePromptMode
+        : CreatePromptMode.BASIC;
+
+    // if it's edit, clone or fork prompt event, use advanced mode otherwise use last create prompt mode
+    const currentCreatePromptMode = e
+      ? CreatePromptMode.ADVANCED
+      : lastCreatePromptMode;
+
+    const isAdvancedMode =
+      currentCreatePromptMode === CreatePromptMode.ADVANCED;
+
+    // Prompt Builder
+    this.PromptBuilder = new PromptBuilder(this.PromptBuilderOptions);
+
     savePromptModal.innerHTML = /*html*/ `
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
         <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
         </div>
 
         <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
-          <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
+          <div class="AIPRM__flex AIPRM__justify-center AIPRM__min-h-full">
+
             <form id="savePromptForm">
-              <input type="hidden" name="ID"  />
-              <input type="hidden" name="OwnPrompt" value="true" />         
-              <input type="hidden" name="Views" value="0" />
-              <input type="hidden" name="Usages" value="0" />
-              <input type="hidden" name="Votes" value="0" />
-              <input type="hidden" name="ForkedFromPromptID" />
-              
               <div
-              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
-              role="dialog" aria-modal="true" aria-labelledby="modal-headline">
-          
-                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__overflow-y-auto">
-                  <label>Prompt Template</label>
-                  <textarea name="Prompt" class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 120px;" required
-                            placeholder="Prompt text including placeholders [TARGETLANGUAGE], [PROMPT], [VARIABLE1], [VARIABLE2] and [VARIABLE3] replaced automagically by AIPRM.&#10;&#10;[VARIABLE1], [VARIABLE2] and [VARIABLE3] require title with optional default value and available values.&#10;&#10;Example: Example [PROMPT] in [TARGETLANGUAGE] with [VARIABLE1], [VARIABLE2] and [VARIABLE3].&#10;[VARIABLE1:Title] [VARIABLE2:Title:Default Value] [VARIABLE3:Title:Default Value:Available Value 1|Available Value 2|Available Value 3].&#10;&#10;[VARIABLE1], [VARIABLE2] and [VARIABLE3] will be pre-filled using URL parameters AIPRM_VARIABLE1, AIPRM_VARIABLE2 and AIPRM_VARIABLE3."
-                            title="Prompt text including placeholders [TARGETLANGUAGE], [PROMPT], [VARIABLE1], [VARIABLE2] and [VARIABLE3] replaced automagically by AIPRM. [VARIABLE1], [VARIABLE2] and [VARIABLE3] require title with optional default value and available values. Example: Example [PROMPT] in [TARGETLANGUAGE] with [VARIABLE1], [VARIABLE2] and [VARIABLE3]. [VARIABLE1:Title] [VARIABLE2:Title:Default Value] [VARIABLE3:Title:Default Value:Available Value 1|Available Value 2|Available Value 3]. [VARIABLE1], [VARIABLE2] and [VARIABLE3] will be pre-filled using URL parameters AIPRM_VARIABLE1, AIPRM_VARIABLE2 and AIPRM_VARIABLE3.">${sanitizeInput(
-                              promptTemplate
-                            )}</textarea>
-            
-                  <label>Teaser</label>
-                  <textarea name="Teaser" required
-                    title="Short teaser for this prompt template, e.g. 'Create a keyword strategy and SEO content plan from 1 [KEYWORD]'"
-                    class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 71px;"
-                    placeholder="Create a keyword strategy and SEO content plan from 1 [KEYWORD]"></textarea>
-                    
-                  <label>Prompt Hint</label>
-                  <input name="PromptHint" required type="text"
-                    title="Prompt hint for this prompt template, e.g. '[KEYWORD]' or '[your list of keywords, maximum ca. 8000]"
-                    class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" placeholder="[KEYWORD] or [your list of keywords, maximum ca. 8000]" />
+                class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+                role="dialog" aria-modal="true" aria-labelledby="modal-headline">
 
-                  <label>Title</label>
-                  <input name="Title" type="text" 
-                    title="Short title for this prompt template, e.g. 'Keyword Strategy'" required placeholder="Keyword Strategy" class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2" />
-            
-                  <div class="AIPRM__flex">
-                    <div class="AIPRM__mr-4 AIPRM__w-full">
-                      <label>Topic</label>
-                      <select name="Community" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
-                        ${this.Topics.map(
-                          (topic) => /*html*/ `
-                              <option value="${sanitizeInput(topic.ID)}" ${
-                            topic.ID === this.PromptTopic ? 'selected' : ''
-                          }>${sanitizeInput(topic.Label)}</option>`
-                        ).join('')}
-                      </select>
-                    </div>
+                <div
+                  class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__overflow-y-auto">
 
-                    <div class="AIPRM__w-full">
-                      <label>Activity</label>
-                      <select name="Category" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
-                        ${this.getActivities(
-                          this.PromptTopic === DefaultPromptTopic
-                            ? this.Topics[0].ID
-                            : this.PromptTopic
-                        )
-                          .map(
-                            (activity) => /*html*/ `
-                              <option value="${sanitizeInput(
-                                activity.ID
-                              )}">${sanitizeInput(activity.Label)}</option>`
-                          )
-                          .join('')}
-                      </select>
-                    </div>
+                  <div class="AIPRM__flex AIPRM__justify-end AIPRM__mb-2 ${
+                    e ? 'AIPRM__hidden' : ''
+                  }">
+                    <ul
+                      class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-900 AIPRM__flex AIPRM__gap-1 AIPRM__list-none AIPRM__p-1 AIPRM__relative AIPRM__rounded-xl AIPRM__text-gray-900 AIPRM__text-sm">
+                      <li>
+                        <input class="AIPRM__hidden" type="radio" name="createPromptMode" id="createPromptModeBasic"
+                          value="${CreatePromptMode.BASIC}" ${
+      !isAdvancedMode ? 'checked' : ''
+    } hidden
+                          onchange="AIPRM.toggleCreatePromptMode(event)" />
+
+                        <label for="createPromptModeBasic" class="AIPRM__cursor-pointer AIPRM__border AIPRM__flex AIPRM__gap-1 AIPRM__items-center AIPRM__justify-center md:AIPRM__gap-2 AIPRM__outline-none AIPRM__px-5 AIPRM__py-1 AIPRM__relative AIPRM__rounded-lg sm:AIPRM__w-auto AIPRM__w-full ${
+                          !isAdvancedMode
+                            ? 'AIPRM__toggle-button--active'
+                            : 'AIPRM__toggle-button--inactive'
+                        }">Basic</label>
+                      </li>
+                      <li>
+                        <input class="AIPRM__hidden" type="radio" name="createPromptMode" id="createPromptModeAdvanced"
+                          value="${CreatePromptMode.ADVANCED}" ${
+      isAdvancedMode ? 'checked' : ''
+    } hidden
+                          onchange="AIPRM.toggleCreatePromptMode(event)" />
+
+                        <label for="createPromptModeAdvanced" class="AIPRM__cursor-pointer AIPRM__border AIPRM__flex AIPRM__gap-1 AIPRM__items-center AIPRM__justify-center md:AIPRM__gap-2 AIPRM__outline-none AIPRM__px-5 AIPRM__py-1 AIPRM__relative AIPRM__rounded-lg sm:AIPRM__w-auto AIPRM__w-full ${
+                          isAdvancedMode
+                            ? 'AIPRM__toggle-button--active'
+                            : 'AIPRM__toggle-button--inactive'
+                        }">Advanced</label>
+                      </li>
+                    </ul>
                   </div>
 
-                  <div class="AIPRM__flex">
-                    <div class="AIPRM__mr-4 AIPRM__w-full">
-                      <label>Who can see this?</label>
-                      <select name="PromptTypeNo" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
-                        <option value="${
-                          PromptTypeNo.PRIVATE
-                        }">Only me (Private)</option>
-                        ${
-                          this.Client.UserQuota?.hasTeamsFeatureEnabled()
-                            ? /* html */ `<option value="${PromptTypeNo.TEAM}">My Team</option>`
-                            : ''
-                        }
-                        <option id="PromptTypeNo-public" value="${
-                          PromptTypeNo.PUBLIC
-                        }">Everyone (Public)</option>
-                      </select>
-                    </div>
-                    <div class="AIPRM__w-full">
-                      <label>Made for</label>
-                      <select multiple multiselect-max-items="1" multiselect-hide-x="true"
-                        name="ModelS" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
-                        ${this.Models.map(
-                          (model) => /*html*/ `
-                              <option value="${sanitizeInput(
-                                model.ID
-                              )}" AIPRMModelStatusNo="${
-                            model.StatusNo
-                          }">${sanitizeInput(model.LabelAuthor)}</option>`
-                        ).join('')}
-                      </select>
-                    </div>
+                  <div id="AIPRM__PromptBuilder" class="${
+                    isAdvancedMode ? 'AIPRM__hidden' : ''
+                  }">
+                    ${this.PromptBuilder.render()}
                   </div>
 
-                  <div class="AIPRM__block">
-                    <div class="AIPRM__flex AIPRM__justify-between AIPRM__mt-4">
-                      <div class="AIPRM__mr-4 AIPRM__w-full"><label>Author Name</label>
-                        <input name="AuthorName" type="text" title="Author Name visible for all users"
-                              placeholder="Author Name" class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
+                  <div id="AIPRM__PromptForm" class="${
+                    !isAdvancedMode ? 'AIPRM__hidden' : ''
+                  }">
+                    <input type="hidden" name="ID" />
+                    <input type="hidden" name="OwnPrompt" value="true" />
+                    <input type="hidden" name="Views" value="0" />
+                    <input type="hidden" name="Usages" value="0" />
+                    <input type="hidden" name="Votes" value="0" />
+                    <input type="hidden" name="ForkedFromPromptID" />
+
+                    <label>Prompt Template</label>
+                    <textarea name="Prompt"
+                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
+                      style="height: 120px;" ${
+                        isAdvancedMode ? ' required ' : ''
+                      }
+                      placeholder="Prompt text including placeholders [TARGETLANGUAGE], [PROMPT], [VARIABLE1], [VARIABLE2] and [VARIABLE3] replaced automagically by AIPRM.&#10;&#10;[VARIABLE1], [VARIABLE2] and [VARIABLE3] require title with optional default value and available values.&#10;&#10;Example: Example [PROMPT] in [TARGETLANGUAGE] with [VARIABLE1], [VARIABLE2] and [VARIABLE3].&#10;[VARIABLE1:Title] [VARIABLE2:Title:Default Value] [VARIABLE3:Title:Default Value:Available Value 1|Available Value 2|Available Value 3].&#10;&#10;[VARIABLE1], [VARIABLE2] and [VARIABLE3] will be pre-filled using URL parameters AIPRM_VARIABLE1, AIPRM_VARIABLE2 and AIPRM_VARIABLE3."
+                      title="Prompt text including placeholders [TARGETLANGUAGE], [PROMPT], [VARIABLE1], [VARIABLE2] and [VARIABLE3] replaced automagically by AIPRM. [VARIABLE1], [VARIABLE2] and [VARIABLE3] require title with optional default value and available values. Example: Example [PROMPT] in [TARGETLANGUAGE] with [VARIABLE1], [VARIABLE2] and [VARIABLE3]. [VARIABLE1:Title] [VARIABLE2:Title:Default Value] [VARIABLE3:Title:Default Value:Available Value 1|Available Value 2|Available Value 3]. [VARIABLE1], [VARIABLE2] and [VARIABLE3] will be pre-filled using URL parameters AIPRM_VARIABLE1, AIPRM_VARIABLE2 and AIPRM_VARIABLE3.">${sanitizeInput(
+                        promptTemplate
+                      )}</textarea>
+
+                    <label>Teaser</label>
+                    <textarea name="Teaser" ${
+                      isAdvancedMode ? ' required ' : ''
+                    }
+                      title="Short teaser for this prompt template, e.g. 'Create a keyword strategy and SEO content plan from 1 [KEYWORD]'"
+                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
+                      style="height: 71px;"
+                      placeholder="Create a keyword strategy and SEO content plan from 1 [KEYWORD]"></textarea>
+
+                    <label>Prompt Hint</label>
+                    <input name="PromptHint" ${
+                      isAdvancedMode ? 'required' : ''
+                    } type="text"
+                      title="Prompt hint for this prompt template, e.g. '[KEYWORD]' or '[your list of keywords, maximum ca. 8000]"
+                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
+                      placeholder="[KEYWORD] or [your list of keywords, maximum ca. 8000]" />
+
+                    <label>Title</label>
+                    <input name="Title" type="text" title="Short title for this prompt template, e.g. 'Keyword Strategy'"
+                      ${
+                        isAdvancedMode ? 'required' : ''
+                      } placeholder="Keyword Strategy"
+                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2" />
+
+                    <div class="AIPRM__flex">
+                      <div class="AIPRM__mr-4 AIPRM__w-full">
+                        <label>Topic</label>
+                        <select name="Community"
+                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full"
+                          ${isAdvancedMode ? ' required ' : ''}>
+                          ${this.Topics.map(
+                            (topic) => /*html*/ `
+                          <option value="${sanitizeInput(topic.ID)}" ${
+                              topic.ID === this.PromptTopic ? 'selected' : ''
+                            }>
+                            ${sanitizeInput(topic.Label)}</option>`
+                          ).join('')}
+                        </select>
                       </div>
 
-                      <div class="AIPRM__w-full"><label>Author URL</label>
-                        <input name="AuthorURL" type="url" title="Author URL visible for all users"
-                              placeholder="https://www.example.com/" class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
-                      </div>                      
-                    </div>  
-                    
-                    <a class="AIPRM__mt-4 AIPRM__text-sm AIPRM__underline AIPRM__hidden" 
-                        id="savePromptForm-forked-from" href="https:/app.aiprm.com/prompt/"
-                        rel="noopener noreferrer" target="_blank">
-                      Forked From
-                    </a>
+                      <div class="AIPRM__w-full">
+                        <label>Activity</label>
+                        <select name="Category"
+                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full"
+                          ${isAdvancedMode ? ' required ' : ''}>
+                          ${this.getActivities(
+                            this.PromptTopic === DefaultPromptTopic
+                              ? this.Topics[0].ID
+                              : this.PromptTopic
+                          )
+                            .map(
+                              (activity) => /*html*/ `
+                          <option value="${sanitizeInput(
+                            activity.ID
+                          )}">${sanitizeInput(activity.Label)}</option>`
+                            )
+                            .join('')}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="AIPRM__flex">
+                      <div class="AIPRM__mr-4 AIPRM__w-full">
+                        <label>Who can see this?</label>
+                        <select name="PromptTypeNo"
+                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full"
+                          ${isAdvancedMode ? ' required ' : ''}>
+                          <option value="${
+                            PromptTypeNo.PRIVATE
+                          }">Only me (Private)</option>
+                          ${
+                            this.Client.UserQuota?.hasTeamsFeatureEnabled()
+                              ? /* html */ `<option value="${PromptTypeNo.TEAM}">My Team</option>`
+                              : ''
+                          }
+                          <option id="PromptTypeNo-public" value="${
+                            PromptTypeNo.PUBLIC
+                          }">Everyone (Public)</option>
+                        </select>
+                      </div>
+                      <div class="AIPRM__w-full">
+                        <label>Made for</label>
+                        <select multiple multiselect-max-items="1" multiselect-hide-x="true" name="ModelS"
+                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                          ${this.Models.map(
+                            (model) => /*html*/ `
+                          <option value="${sanitizeInput(
+                            model.ID
+                          )}" AIPRMModelStatusNo="${
+                              model.StatusNo
+                            }">${sanitizeInput(model.LabelAuthor)}</option>`
+                          ).join('')}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="AIPRM__block">
+                      <div class="AIPRM__flex AIPRM__justify-between AIPRM__mt-4">
+                        <div class="AIPRM__mr-4 AIPRM__w-full"><label>Author Name</label>
+                          <input name="AuthorName" type="text" title="Author Name visible for all users"
+                            placeholder="Author Name"
+                            class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
+                        </div>
+
+                        <div class="AIPRM__w-full"><label>Author URL</label>
+                          <input name="AuthorURL" type="url" title="Author URL visible for all users"
+                            placeholder="https://www.example.com/"
+                            class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
+                        </div>
+                      </div>
+
+                      <a class="AIPRM__mt-4 AIPRM__text-sm AIPRM__underline AIPRM__hidden" id="savePromptForm-forked-from"
+                        href="https:/app.aiprm.com/prompt/" rel="noopener noreferrer" target="_blank">
+                        Forked From
+                      </a>
+                    </div>
+
+                    <p class="AIPRM__mt-6 AIPRM__text-[10px]" id="savePromptForm-public-disclaimer">Please be mindful of what
+                      you share, and do not include any confidential information, as we are not responsible for
+                      any actions taken by others with the information you choose to share.</p>
                   </div>
-            
-                  <p class="AIPRM__mt-6 AIPRM__text-[10px]" id="savePromptForm-public-disclaimer">Please be mindful of what you share, and do not include any confidential information, as we are not responsible for
-                    any actions taken by others with the information you choose to share.</p>
+
                 </div>
-            
+
                 <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
-                  <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
-                          onclick="AIPRM.hideSavePromptModal()"> Cancel
+                  <button type="button"
+                    class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
+                    onclick="AIPRM.hideSavePromptModal()"> Cancel
                   </button>
-                  <button id="AIPRM__cloneButton" type="button" class="AIPRM__hidden AIPRM__bg-blue-600 hover:AIPRM__bg-blue-700 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white">Clone
+                  <button id="AIPRM__cloneButton" type="button"
+                    class="AIPRM__hidden AIPRM__bg-blue-600 hover:AIPRM__bg-blue-700 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white">Clone
                   </button>
-                  <button type="submit" class="AIPRM__bg-green-600 hover:AIPRM__bg-green-700 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white">Save Prompt
+                  <button type="submit"
+                    class="AIPRM__bg-green-600 hover:AIPRM__bg-green-700 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white">Save
+                    Prompt
                   </button>
                 </div>
-            
+                
               </div>
             </form>
+
           </div>
         </div>
-        
+
       </div>
     `;
 
@@ -2795,6 +3048,82 @@ ${textContent}
         this.hideSavePromptModal();
       }
     });
+  },
+
+  /**
+   *
+   * Toggle between the "Basic" and "Advanced" mode
+   * and the "Prompt Builder" and "Save Prompt Form"
+   *
+   * @param {Event} event
+   */
+  toggleCreatePromptMode(event) {
+    // update last create prompt mode in localStorage
+    localStorage.setItem(lastCreatePromptModeKey, event.currentTarget.value);
+
+    // toggle the "Basic" and "Advanced" switch
+    event.currentTarget.parentElement.parentElement
+      .querySelectorAll('label')
+      .forEach((element) => {
+        [
+          'AIPRM__toggle-button--active',
+          'AIPRM__toggle-button--inactive',
+        ].forEach((className) => {
+          element.classList.toggle(className);
+        });
+      });
+
+    // toggle the "Prompt Builder" and "Save Prompt Form"
+    document
+      .querySelectorAll('#AIPRM__PromptBuilder, #AIPRM__PromptForm')
+      .forEach((element) => {
+        element.classList.toggle('AIPRM__hidden');
+      });
+
+    // toggle the required attribute on the inputs ("An invalid form control with ... is not focusable.")
+    // if advanced mode -> add required attribute, else remove it
+    document
+      .querySelectorAll(
+        '#AIPRM__PromptForm textarea[name="Prompt"], #AIPRM__PromptForm textarea[name="Teaser"], #AIPRM__PromptForm input[name="PromptHint"], #AIPRM__PromptForm input[name="Title"], #AIPRM__PromptForm select[name="Community"], #AIPRM__PromptForm select[name="Category"], #AIPRM__PromptForm select[name="PromptTypeNo"]'
+      )
+      .forEach((element) => {
+        element.toggleAttribute('required');
+      });
+
+    this.buildBasicPrompt();
+  },
+
+  // Build prompt using PromptBuilder and update the form
+  buildBasicPrompt() {
+    this.PromptBuilder.build();
+
+    const prompt = this.PromptBuilder.get();
+
+    if (!prompt.Prompt) {
+      return;
+    }
+
+    const form = document.getElementById('savePromptForm');
+
+    const currentPromptTypeNo = +form.elements['PromptTypeNo'].value;
+
+    // Set AuthorName if current PromptTypeNo is TEAM (required)
+    if (currentPromptTypeNo === PromptTypeNo.TEAM) {
+      // Use AIPRM user name if available, otherwise OpenAI user name as fallback
+      form.elements['AuthorName'].value =
+        this.Client.AppUser?.Name ||
+        window?.__NEXT_DATA__?.props?.pageProps?.user?.name ||
+        '';
+    }
+    // Otherwise set PromptTypeNo to PRIVATE (PUBLIC requires AuthorURL)
+    else {
+      form.elements['PromptTypeNo'].value = PromptTypeNo.PRIVATE;
+    }
+
+    form.elements['Prompt'].value = prompt.Prompt;
+    form.elements['Teaser'].value = prompt.Teaser;
+    form.elements['PromptHint'].value = prompt.PromptHint;
+    form.elements['Title'].value = prompt.Title;
   },
 
   // This function adds an "Export Button" to the sidebar
@@ -5776,7 +6105,7 @@ ${textContent}
 
     this.Client.usePrompt(promptOriginal.ID, UsageTypeNo.FORK);
 
-    await this.showSavePromptModal();
+    await this.showSavePromptModal(new CustomEvent(forkPromptTemplateEvent));
 
     // Pre-fill the prompt template modal with the prompt template
     const form = document.getElementById('savePromptForm');
@@ -5816,7 +6145,7 @@ ${textContent}
   async clonePrompt(idx) {
     const promptOriginal = (await this.getCurrentPromptTemplates())[idx];
 
-    await this.showSavePromptModal();
+    await this.showSavePromptModal(new CustomEvent(clonePromptTemplateEvent));
 
     // Pre-fill the prompt template modal with the cloned prompt template
     const form = document.getElementById('savePromptForm');

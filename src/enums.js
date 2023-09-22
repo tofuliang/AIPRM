@@ -61,6 +61,8 @@ const UsageTypeNo = {
   VIEW_SOURCE: 256,
   FORK: 512,
   EXPORT: 1024,
+  CREATE_BASIC: 2048,
+  CREATE_ADVANCED: 4096,
 };
 
 /** @enum {number} */
@@ -181,6 +183,9 @@ const PlanLevelNo = {
   PRO: 300,
   ELITE: 400,
   TITAN: 1000,
+  TEAM: 2000,
+  BUSINESS: 3000,
+  ENTERPRISE: 5000,
 };
 
 /** @enum {number} */
@@ -217,6 +222,12 @@ const LayoutChangeType = {
   PROMPT_TEMPLATES: 'PromptTemplates',
 };
 
+/** @enum {string} */
+const CreatePromptMode = {
+  BASIC: 'basic',
+  ADVANCED: 'advanced',
+};
+
 export {
   PromptTemplatesType,
   NotificationSeverity,
@@ -242,4 +253,5 @@ export {
   PromptFeatureBitset,
   ModelStatusNo,
   LayoutChangeType,
+  CreatePromptMode,
 };
