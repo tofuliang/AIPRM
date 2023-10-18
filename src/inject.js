@@ -28,6 +28,9 @@ import {
   AppTeamURL,
   AppPricingURL,
   PromptBuilderFeedURL,
+  ValidateVariableMaxCount,
+  ValidateVariablePlaceholder,
+  ValidateVariableDefinition,
 } from './config.js';
 
 /* eslint-disable no-unused-vars */
@@ -119,6 +122,8 @@ import { PromptBuilder } from './prompt-builder.js';
 /** @typedef {{ID: number, Label: string, Info: string}} MyProfileInfo */
 
 /** @typedef {{ID: string, LabelUser: string, LabelAuthor: string, StatusNo: ModelStatusNo}} Model */
+
+/** @typedef {{EnumMaxSizeError: boolean, Errors: string[]}} ValidatePromptVariablesResult */
 
 const DefaultPromptActivity = 'all';
 const DefaultPromptTopic = 'all';
@@ -870,10 +875,21 @@ ${textContent}
         // Fetch the prompt using the AIPRM API client
         prompt = await this.Client.getPrompt(promptID);
       } catch (error) {
-        this.showNotification(
-          NotificationSeverity.ERROR,
-          'Something went wrong. Please try again.'
-        );
+        if (
+          error instanceof Reaction &&
+          (error.ReactionNo === ReactionNo.RXN_AIPRM_PROMPT_NOT_FOUND ||
+            error.ReactionNo === ReactionNo.RXN_AIPRM_INVALID_ID)
+        ) {
+          this.showNotification(
+            NotificationSeverity.WARNING,
+            `Requested prompt does not exist.<br><br>Please use the search function to find the prompt you are looking for.`
+          );
+        } else {
+          this.showNotification(
+            NotificationSeverity.ERROR,
+            'Something went wrong. Please try again.'
+          );
+        }
         return;
       }
     }
@@ -1557,6 +1573,30 @@ ${textContent}
     observer.observe(document.body, { subtree: true, childList: true });
   },
 
+  // Find the message part index in parts array (skip image for multimodal_text content type)
+  findMessagePartIndex(message) {
+    // default message part index is 0 for the first prompt
+    if (message?.content?.content_type !== 'multimodal_text') {
+      return 0;
+    }
+
+    // find the message part index for multimodal_text content type (skip one or multiple images)
+    for (let i = 0; i < message?.content?.parts?.length; i++) {
+      // if the value is not object, then return the index
+      if (typeof message?.content?.parts[i] !== 'object') {
+        return i;
+      }
+    }
+
+    // if the message part is not found show an error
+    this.showNotification(
+      NotificationSeverity.ERROR,
+      'Could not modify prompt - no message part found'
+    );
+
+    throw new Error('Could not modify prompt - no message part found');
+  },
+
   replaceFetch() {
     window.fetch = async (...t) => {
       // If the request is not for the chat backend API, just use the original fetch function
@@ -1585,6 +1625,9 @@ ${textContent}
           // Parse the request body from JSON
           const body = JSON.parse(options.body);
 
+          // Get the index of the message part in the request body
+          const messagePartIndex = this.findMessagePartIndex(body.messages[0]);
+
           const myProfileInfo = this.MyProfileInfos
             ? this.MyProfileInfos.find(
                 (myProfileInfo) =>
@@ -1594,7 +1637,9 @@ ${textContent}
 
           if (myProfileInfo) {
             // Add the profile message to the request body
-            body.messages[0].content.parts[0] += `\n\n${myProfileInfo.Info}`;
+            body.messages[0].content.parts[
+              messagePartIndex
+            ] += `\n\n${myProfileInfo.Info}`;
           }
 
           // Reset the includeMyProfileInfo
@@ -1630,9 +1675,12 @@ ${textContent}
         // Parse the request body from JSON
         const body = JSON.parse(options.body);
 
+        // Get the index of the message part in the request body
+        const messagePartIndex = this.findMessagePartIndex(body.messages[0]);
+
         if (template) {
           // Get the prompt from the request body
-          const prompt = body.messages[0].content.parts[0];
+          const prompt = body.messages[0].content.parts[messagePartIndex];
 
           // Use the default target language if no target language has been selected
           const targetLanguage = (
@@ -1667,13 +1715,13 @@ ${textContent}
             ''
           );
 
-          body.messages[0].content.parts[0] = promptTextUpdated;
+          body.messages[0].content.parts[messagePartIndex] = promptTextUpdated;
 
           // Replace Live Crawling placeholders with the Live Crawling result
-          body.messages[0].content.parts[0] =
+          body.messages[0].content.parts[messagePartIndex] =
             await this.injectLiveCrawlingResult(
               prompt,
-              body.messages[0].content.parts[0]
+              body.messages[0].content.parts[messagePartIndex]
             );
         }
 
@@ -1727,7 +1775,9 @@ ${textContent}
             : null;
 
           if (myProfileInfo) {
-            body.messages[0].content.parts[0] += `\n\n${myProfileInfo.Info}`;
+            body.messages[0].content.parts[
+              messagePartIndex
+            ] += `\n\n${myProfileInfo.Info}`;
           }
 
           // Reset the includeMyProfileInfo
@@ -1736,7 +1786,9 @@ ${textContent}
 
         // If the user has selected a tone, writing style or target language, add a prompt to the request body
         if (toneWritingStyleLanguagePrompt.length > 0) {
-          body.messages[0].content.parts[0] += `\n\nPlease write in ${toneWritingStyleLanguagePrompt.join(
+          body.messages[0].content.parts[
+            messagePartIndex
+          ] += `\n\nPlease write in ${toneWritingStyleLanguagePrompt.join(
             ', '
           )}.`;
         }
@@ -1970,18 +2022,20 @@ ${textContent}
 
   // Add "Save prompt as template" button to the user prompt container next to the "Edit" button
   insertSavePromptAsTemplateButton() {
+    const selectorConfig = this.Config.getSelectorConfig();
+
     // get the first prompt
-    const firstPrompt = document.querySelector(
-      this.Config.getSelectorConfig().FirstPrompt
-    );
+    const firstPrompt = document.querySelector(selectorConfig.FirstPrompt);
 
     if (!firstPrompt) {
       return;
     }
 
     // get parent element of the first prompt to find the "Edit" button
-    const buttons =
-      firstPrompt.parentElement.parentElement.querySelectorAll('button');
+    // select only buttons that do not contain image with alt "Uploaded image"
+    const buttons = firstPrompt.parentElement.parentElement.querySelectorAll(
+      selectorConfig.FirstPromptButtons
+    );
 
     if (!buttons || buttons.length === 0) {
       return;
@@ -2092,25 +2146,17 @@ ${textContent}
       return;
     }
 
-    // reset prompt variables to extract them based on updated prompt
-    prompt.PromptVariables = undefined;
+    // validate prompt variables
+    let validateVariablesResult = this.validatePromptVariables(prompt);
+    if (validateVariablesResult.EnumMaxSizeError) {
+      this.Client.UserQuota.upgradePromptVariableEnumMaxSize();
+      return;
+    } else if (validateVariablesResult.Errors?.length > 0) {
+      let errorMessage = validateVariablesResult.Errors.join('<br>');
+      errorMessage +=
+        '<br><a class="AIPRM__underline" href="https://www.aiprm.com/tutorials/how-to-use-variables-in-prompts/#title-how-to-use-variables-in-prompts-0" target="_blank" rel="noopener noreferrer">Learn more about prompt variables</a>.';
 
-    // check if prompt variables use less than max allowed enum values
-    this.extractVariableDefinitions(prompt);
-
-    // max allowed enum values for prompt variables
-    const promptVarEnumMaxSize =
-      this.Client.UserQuota.promptVariableEnumMaxSize();
-
-    // check if prompt variables use less than max allowed enum values
-    if (prompt.PromptVariables) {
-      for (var i = 0; i < prompt.PromptVariables.length; i++) {
-        if (prompt.PromptVariables[i].EnumS.length > promptVarEnumMaxSize) {
-          this.Client.UserQuota.upgradePromptVariableEnumMaxSize();
-          prompt.PromptVariables = undefined;
-          return;
-        }
-      }
+      errors.push(errorMessage);
     }
 
     // reset prompt variables to undefined to avoid sending them
@@ -2175,7 +2221,7 @@ ${textContent}
         </div>
       `;
 
-      this.showNotification(NotificationSeverity.ERROR, errorMessage, false);
+      this.showNotification(NotificationSeverity.WARNING, errorMessage, false);
     }
 
     return errors.length === 0;
@@ -5534,6 +5580,144 @@ ${textContent}
 
     // Hide the "Continue Writing" button (prompt selected/new chat)
     this.hideContinueActionsButton();
+  },
+
+  /**
+   * Validates prompt variables
+   *
+   * @param {string} template - Prompt template
+   * @returns {ValidatePromptVariablesResult} - Validation result
+   */
+  validatePromptVariables(template) {
+    const errors = [];
+
+    var matches;
+
+    // collect all prompt variable placeholders
+    var promptVariablePlaceholders = [];
+    while ((matches = ValidateVariablePlaceholder.exec(template.Prompt))) {
+      let promptVariableID = matches[1];
+
+      let unique = true;
+      promptVariablePlaceholders.forEach((v) => {
+        if (v === promptVariableID) {
+          unique = false;
+        }
+      });
+
+      if (unique) {
+        promptVariablePlaceholders.push(promptVariableID);
+      }
+    }
+
+    // collect all prompt variable definitions
+    var promptVariableDefinitions = [];
+    while ((matches = ValidateVariableDefinition.exec(template.Prompt))) {
+      let promptVariableID = matches[1];
+
+      var unique = true;
+      promptVariableDefinitions.forEach((v) => {
+        if (v.ID === promptVariableID) {
+          unique = false;
+        }
+      });
+
+      if (unique) {
+        let defaultValue = '';
+        if (matches.length >= 4 && matches[3]) {
+          defaultValue = matches[3].substring(1);
+        }
+
+        let enumS = [];
+        if (matches.length >= 5 && matches[4]) {
+          let enumsString = matches[4].substring(1);
+
+          if (enumsString.length > 0) {
+            enumS = enumsString.split('|');
+          }
+        }
+
+        promptVariableDefinitions.push({
+          ID: promptVariableID,
+          Label: matches[2],
+          DefaultValue: defaultValue,
+          EnumS: enumS,
+        });
+      } else {
+        errors.push(
+          `Duplicate variable definition for VARIABLE${promptVariableID}.`
+        );
+      }
+    }
+
+    // check if there are not over limit variables
+    if (
+      promptVariablePlaceholders.length > ValidateVariableMaxCount ||
+      promptVariableDefinitions.length > ValidateVariableMaxCount
+    ) {
+      errors.push(
+        `Too many variables. Only up to ${ValidateVariableMaxCount} variables can be used per prompt template.`
+      );
+
+      return { Errors: errors };
+    }
+
+    // check if all prompt variable placeholders have a definition
+    promptVariablePlaceholders.forEach((placeholder) => {
+      if (placeholder <= ValidateVariableMaxCount) {
+        let found = false;
+        promptVariableDefinitions.forEach((definition) => {
+          if (definition.ID === placeholder) {
+            found = true;
+          }
+        });
+
+        if (!found) {
+          errors.push(
+            `Missing variable definition for VARIABLE${placeholder}.`
+          );
+        }
+      } else {
+        errors.push(
+          `Invalid variable placeholder for VARIABLE${placeholder}. Only variables 1 to 6 can be used.`
+        );
+      }
+    });
+
+    // max allowed enum values for prompt variables
+    const promptVarEnumMaxSize =
+      this.Client.UserQuota.promptVariableEnumMaxSize();
+
+    // check prompt variable enum values size
+    for (var i = 0; i < promptVariableDefinitions.length; i++) {
+      if (promptVariableDefinitions[i].EnumS.length > promptVarEnumMaxSize) {
+        return { EnumMaxSizeError: true };
+      }
+    }
+
+    // check if all prompt variable definitions have a placeholder
+    promptVariableDefinitions.forEach((definition) => {
+      if (definition.ID <= ValidateVariableMaxCount) {
+        let found = false;
+        promptVariablePlaceholders.forEach((placeholder) => {
+          if (definition.ID === placeholder) {
+            found = true;
+          }
+        });
+
+        if (!found) {
+          errors.push(
+            `Unused variable definition for VARIABLE${definition.ID}.`
+          );
+        }
+      } else {
+        errors.push(
+          `Invalid variable definition for VARIABLE${definition.ID}. Only variables 1 to 6 can be defined.`
+        );
+      }
+    });
+
+    return { Errors: errors };
   },
 
   extractVariableDefinitions(template) {

@@ -88,6 +88,10 @@ const QuotaMessagesURL =
   'https://api.aiprm.com/json/quota-messages-20230324.json?v=';
 const ConfigURL = 'https://api.aiprm.com/json/config-20230324.json?v=';
 
+const ValidateVariableMaxCount = 6;
+const ValidateVariablePlaceholder = /\[VARIABLE([0-9]+)\]/g;
+const ValidateVariableDefinition = /\[VARIABLE([0-9]+):(.+?)(:.*?)?(:.*?)?\]/g;
+
 export {
   PromptPlaceholder,
   TargetLanguagePlaceholder,
@@ -120,13 +124,16 @@ export {
   QuotaMessagesURL,
   ConfigURL,
   AppTeamURL,
+  ValidateVariableMaxCount,
+  ValidateVariablePlaceholder,
+  ValidateVariableDefinition,
 };
 
 /** @typedef {{Enabled: boolean, Config: {APIEndpointURL: string, MaxCharacters: number, MaxWords: number, CrawledTextPrompt: string, CrawledSourcePrompt: string}}} LiveCrawlingConfig */
 
 /** @typedef {{Enabled: boolean, Config: {Selectors: Object.<string, string>}} WatermarkConfig */
 
-/** @typedef {{FirstPrompt: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string, ShareButton: string, SuggestedPrompts: string, DashboardTitle: string}} SelectorConfig */
+/** @typedef {{FirstPrompt: string, FirstPromptButtons: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string, ShareButton: string, SuggestedPrompts: string, DashboardTitle: string}} SelectorConfig */
 
 /** @typedef {{Selector: string, Add: string[], Remove: string[]}} LayoutChangeConfig */
 
