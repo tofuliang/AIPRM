@@ -16,6 +16,7 @@ import {
   ListStatusNo,
   ItemStatusNo,
   MemberRoleNo,
+  LicenseWarningLevelNo,
 } from './enums.js';
 /* eslint-enable */
 
@@ -25,7 +26,7 @@ import { Reaction } from './rxn.js';
 
 /** @typedef {{MessageID: string, MessageGroupNo: MessageGroupNo, MessageSeverityNo: MessageSeverityNo, MessageStatusNo: MessageStatusNo, MessageSubject: string, MessageBodyHTML: string, OnlyExternalID: string, OnlyExternalSystemNo: ExternalSystemNo, ExpiryTime: string, CreationTime: string}} Message */
 
-/** @typedef {{ExternalID: string, ExternalSystemNo: ExternalSystemNo, Email: string, Name: string, UserStatusNo: UserStatusNo, UserLevelNo: UserLevelNo, UserFootprint: string, MaxNewPublicPromptsAllowed: number, MaxNewPrivatePromptsAllowed: number, IsLinked: boolean, FeatureBitset: number}} User */
+/** @typedef {{ExternalID: string, ExternalSystemNo: ExternalSystemNo, Email: string, Name: string, UserStatusNo: UserStatusNo, UserLevelNo: UserLevelNo, UserFootprint: string, MaxNewPublicPromptsAllowed: number, MaxNewPrivatePromptsAllowed: number, IsLinked: boolean, FeatureBitset: number, LicenseWarning: UserLicenseWarning}} User */
 
 /** @typedef {{Email: string, Name: string}} AppUser */
 
@@ -44,6 +45,8 @@ import { Reaction } from './rxn.js';
 /** @typedef {{TeamID: string, MemberRoleNo: MemberRoleNo, TeamName: string, TeamDescription: string}} UserTeam */
 
 /** @typedef {Map<String, UserTeam>} UserTeamM */
+
+/** @typedef {{Message: string, WarningLevelNo: LicenseWarningLevelNo}} UserLicenseWarning */
 
 /**
  * @typedef {object} AIPRMClient
@@ -217,6 +220,10 @@ const AIPRMClient = {
             for (const team of res.TeamS) {
               this.UserTeamM.set(team.TeamID, team);
             }
+          }
+
+          if (Object.prototype.hasOwnProperty.call(res, 'LicenseWarning')) {
+            this.User.LicenseWarning = res.LicenseWarning;
           }
 
           // has Name and Email

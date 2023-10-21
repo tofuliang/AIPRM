@@ -133,7 +133,35 @@ export {
 
 /** @typedef {{Enabled: boolean, Config: {Selectors: Object.<string, string>}} WatermarkConfig */
 
-/** @typedef {{FirstPrompt: string, FirstPromptButtons: string, ChatLogContainer: string, ConversationResponse: string, ModelSelectorContainer: string, ShareButton: string, SuggestedPrompts: string, DashboardTitle: string}} SelectorConfig */
+/**
+ * @typedef {Object} SelectorConfig
+ * @property {string} FirstPrompt
+ * @property {string} FirstPromptButtons
+ * @property {string} ChatLogContainer
+ * @property {string} ConversationResponse
+ * @property {string} ModelSelectorContainer
+ * @property {string} ShareButton
+ * @property {string} SuggestedPrompts
+ * @property {string} DashboardTitle
+ * @property {string} Sidebar
+ * @property {string} ExportButton
+ * @property {string} ExportButtonChatStarted
+ * @property {string} PromptTextarea
+ * @property {string} PromptSubmitButton
+ * @property {string} ConversationResponseWrapper
+ * @property {string} NewChatSidebar
+ * @property {string} NewChatSidebarButton
+ * @property {string} NewChatSidebarButtonText
+ * @property {string} NewChatTopbar
+ * @property {string} NewChatTopbarButton
+ * @property {string} ElementAddedSidebarID1
+ * @property {string} ElementAddedSidebarID2
+ * @property {string} ElementAddedExportButtonDisable
+ * @property {string} ElementAddedExportButtonEnable
+ * @property {string} ElementAddedSavePromptAsTemplate
+ * @property {string} LangWrapperSpacer
+ * @property {string} SavePromptAsTemplatePromptText
+ */
 
 /** @typedef {{Selector: string, Add: string[], Remove: string[]}} LayoutChangeConfig */
 

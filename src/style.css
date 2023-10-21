@@ -762,6 +762,10 @@
   width: 100%;
 }
 
+.AIPRM__max-w-2xl {
+  max-width: 42rem;
+}
+
 .AIPRM__max-w-\[6rem\] {
   max-width: 6rem;
 }
@@ -1159,6 +1163,11 @@
 .AIPRM__py-4 {
   padding-top: 1rem;
   padding-bottom: 1rem;
+}
+
+.AIPRM__py-6 {
+  padding-top: 1.5rem;
+  padding-bottom: 1.5rem;
 }
 
 .AIPRM__pb-1 {

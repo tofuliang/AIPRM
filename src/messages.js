@@ -16,14 +16,38 @@ const NotificationMessageSeverityClassName = {
 };
 
 /**
- * Show the first active and not expired message with MessageSeverityNo.MANDATORY_MUST_CONFIRM (if any)
- * otherwise show the first active and not expired message with other MessageSeverityNo (if any)
+ * Show the first active and not expired static message (if any),
+ * or the first active and not expired message with MessageSeverityNo.MANDATORY_MUST_CONFIRM (if any),
+ * or the first active and not expired message with other MessageSeverityNo (if any)
  *
+ * @param {import("./client").Message[]} staticMessages
  * @param {import("./client").Message[]} messages
  * @param {(MessageID: string)} confirmCallback
  * @param {(MessageID: string, Vote: MessageVoteTypeNo)} voteCallback
+ * @param {(MessageID: string)} readStaticMessageCallback
+ * @returns {boolean} true if a message was shown, false otherwise
  */
-const showMessage = (messages, confirmCallback, voteCallback) => {
+const showMessage = (
+  staticMessages,
+  messages,
+  confirmCallback,
+  voteCallback,
+  readStaticMessageCallback
+) => {
+  // get the first active and not expired static message
+  let staticMessage = staticMessages?.find(
+    (message) =>
+      message.MessageStatusNo === MessageStatusNo.ACTIVE &&
+      (!message.ExpiryTime || new Date(message.ExpiryTime) > new Date())
+  );
+
+  // if there is a static message, show it
+  if (staticMessage) {
+    createNotificationMessage(staticMessage, readStaticMessageCallback);
+
+    return true;
+  }
+
   // get the first active and not expired message with MessageSeverityNo.MANDATORY_MUST_CONFIRM
   let message = messages?.find(
     (message) =>
@@ -36,7 +60,7 @@ const showMessage = (messages, confirmCallback, voteCallback) => {
   if (message) {
     createConfirmMessageModal(message, confirmCallback);
 
-    return;
+    return true;
   }
 
   // otherwise, get the first active and not expired message with other MessageSeverityNo (if any)
@@ -49,10 +73,12 @@ const showMessage = (messages, confirmCallback, voteCallback) => {
 
   // if there is no message, return - otherwise show it
   if (!message) {
-    return;
+    return false;
   }
 
   createNotificationMessage(message, voteCallback);
+
+  return true;
 };
 
 /**

@@ -228,6 +228,13 @@ const CreatePromptMode = {
   ADVANCED: 'advanced',
 };
 
+/** @enum {number} */
+const LicenseWarningLevelNo = {
+  UNKNOWN: 0,
+  WARNING: 1,
+  ERROR: 2,
+};
+
 export {
   PromptTemplatesType,
   NotificationSeverity,
@@ -254,4 +261,5 @@ export {
   ModelStatusNo,
   LayoutChangeType,
   CreatePromptMode,
+  LicenseWarningLevelNo,
 };

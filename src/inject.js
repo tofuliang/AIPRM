@@ -50,6 +50,7 @@ import {
   ModelStatusNo,
   LayoutChangeType,
   CreatePromptMode,
+  LicenseWarningLevelNo,
 } from './enums.js';
 /* eslint-enable */
 
@@ -72,6 +73,7 @@ import {
 
 import { MultiselectDropdown } from './multiselect-dropdown.js';
 import { PromptBuilder } from './prompt-builder.js';
+import { VERSION } from './version.js';
 
 /**
  * @typedef {Object} PromptVariable
@@ -142,6 +144,8 @@ const myProfileMessageKey = 'myProfileMessageAIPRM';
 const hideWatermarkKey = 'AIPRM_hideWatermark';
 const includeMyProfileInfoKey = 'AIPRM_includeMyProfileInfo';
 const selectedMyProfileInfoKey = 'AIPRM_selectedMyProfileInfoKey';
+const licenseWarningDismissedKey = 'AIPRM_licenseWarningDismissed';
+const lastSeenStaticMessageKey = 'AIPRM_lastSeenStaticMessage';
 
 const queryParamPromptID = 'AIPRM_PromptID';
 const queryParamVariable = 'AIPRM_VARIABLE';
@@ -315,6 +319,11 @@ window.AIPRM = {
   /** @type {import('./client.js').Message[]} */
   Messages: [],
 
+  /** @type {import('./client.js').Message[]} */
+  StaticMessages: [],
+
+  isMessageShown: false,
+
   // Selected my profile info to include in the submitted prompt
   IncludeMyProfileMessage:
     localStorage.getItem(includeMyProfileInfoKey) === 'true' ? true : false,
@@ -324,8 +333,117 @@ window.AIPRM = {
   // Prefill prompt via event
   PrefillPrompt: null,
 
+  // Check version using version server
+  async checkVersion() {
+    try {
+      const response = await this.fetch(
+        `https://version.aiprm.com/check/${VERSION}?v=${this.CacheBuster}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Could not check for updates');
+      }
+
+      const versionCheck = await response.json();
+
+      if (!versionCheck?.IsOutdated) {
+        return;
+      }
+
+      // Version is outdated - display a warning message
+      const elementID = 'AIPRM-VersionWarning';
+      let element = document.getElementById(elementID);
+
+      // If the warning doesn't exist, create it
+      if (!element) {
+        element = document.createElement('div');
+        element.id = elementID;
+      }
+
+      element.innerHTML = /*html*/ `
+          <div class="AIPRM__fixed AIPRM__flex AIPRM__justify-center AIPRM__w-full AIPRM__top-0 AIPRM__z-50 AIPRM__pointer-events-none">
+            <div class="AIPRM__bg-red-500 AIPRM__w-full AIPRM__justify-center  AIPRM__flex AIPRM__flex-row AIPRM__pointer-events-auto AIPRM__px-6 AIPRM__py-6 AIPRM__text-white" role="alert">
+              <div class="AIPRM__flex AIPRM__gap-4">
+                <div>
+                  <p class="AIPRM__max-w-2xl" style="overflow-wrap: anywhere;">
+                    ${versionCheck.Message}
+                  </p>
+                </div>
+                <button>${svg('Cross')}</button>
+              </div>
+            </div>
+          </div>
+        `;
+
+      // Remove the warning from the DOM on click
+      element.querySelector('button').addEventListener('click', () => {
+        element.remove();
+      });
+
+      document.body.appendChild(element);
+    } catch (error) {
+      // Display fallback information
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not check for updates.'
+      );
+    }
+  },
+
+  // Fetch static static messages from remote JSON file
+  async fetchStaticMessages() {
+    try {
+      const response = await this.fetch(
+        `https://static.aiprm.com/${VERSION}/messages.json?v=${this.CacheBuster}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Could not load static messages');
+      }
+
+      /** @type {import('./client.js').Message[]} */
+      let messages = await response.json();
+
+      this.StaticMessages = messages?.length > 0 ? messages : [];
+
+      // no new messages
+      if (!this.getUnseenStaticMessages().length) {
+        return;
+      }
+
+      this.showMessages();
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not fetch static messages.'
+      );
+    }
+  },
+
+  // Get the last seen static message ID from local storage and filter out messages before this ID (including this ID)
+  getUnseenStaticMessages() {
+    // skip messages before the last seen message
+    const lastSeenStaticMessage = +localStorage.getItem(
+      lastSeenStaticMessageKey
+    );
+
+    this.StaticMessages = !lastSeenStaticMessage
+      ? this.StaticMessages
+      : this.StaticMessages.filter(
+          (message) => message.MessageID > lastSeenStaticMessage
+        );
+
+    return this.StaticMessages;
+  },
+
   async init() {
     console.log('AIPRM init');
+
+    // check version before initializing
+    await this.checkVersion();
+
+    // fetch static system messages
+    await this.fetchStaticMessages();
 
     // listen for AIPRM.prompt event from content script
     document.addEventListener('AIPRM.prompt', (event) => {
@@ -376,7 +494,10 @@ window.AIPRM = {
 
     this.createObserver();
 
-    if (!this.Client.UserQuota.connectAccountAnnouncement()) {
+    if (
+      !this.isMessageShown &&
+      !this.Client.UserQuota.connectAccountAnnouncement()
+    ) {
       this.showMessages();
     }
 
@@ -428,6 +549,69 @@ window.AIPRM = {
     this.addWatermark();
 
     this.setupFavoritePromptsContextMenu();
+
+    this.addLicenseWarning();
+  },
+
+  addLicenseWarning() {
+    if (!this.Client.User.LicenseWarning) {
+      return;
+    }
+
+    const licenseWarningDismissed = localStorage.getItem(
+      licenseWarningDismissedKey
+    );
+
+    if (licenseWarningDismissed) {
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+
+      if (now.getTime() <= licenseWarningDismissed) {
+        return;
+      }
+    }
+
+    const elementID = 'AIPRM-LicenseWarning';
+    let element = document.getElementById(elementID);
+
+    // if notification doesn't exist, create it
+    if (!element) {
+      element = document.createElement('div');
+      element.id = elementID;
+    }
+
+    const severityClassName = {
+      [LicenseWarningLevelNo.WARNING]: 'AIPRM__bg-orange-500',
+      [LicenseWarningLevelNo.ERROR]: 'AIPRM__bg-red-500',
+    };
+
+    element.innerHTML = /*html*/ `
+      <div class="AIPRM__fixed AIPRM__flex AIPRM__justify-center AIPRM__w-full AIPRM__top-0 AIPRM__z-50 AIPRM__pointer-events-none">
+        <div class="${
+          severityClassName[this.Client.User.LicenseWarning.WarningLevelNo]
+        } AIPRM__w-full AIPRM__justify-center  AIPRM__flex AIPRM__flex-row AIPRM__pointer-events-auto AIPRM__px-6 AIPRM__py-6 AIPRM__text-white" role="alert">
+          <div class="AIPRM__flex AIPRM__gap-4">
+            <div>
+              <p class="AIPRM__max-w-2xl" style="overflow-wrap: anywhere;">${
+                this.Client.User.LicenseWarning.Message
+              }</p>
+            </div>
+            <button>${svg('Cross')}</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // remove element from DOM on click
+    element.querySelector('button').addEventListener('click', () => {
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      localStorage.setItem(licenseWarningDismissedKey, now.getTime());
+
+      element.remove();
+    });
+
+    document.body.appendChild(element);
   },
 
   // Preset default create prompt mode based on existing (advanced) or new user (basic)
@@ -939,12 +1123,22 @@ ${textContent}
     }
   },
 
-  // Display one of the messages
+  /**
+   * Display one of the messages
+   *
+   * @returns {boolean} true if message is shown, false if not
+   */
   showMessages() {
-    showMessage(
+    if (this.isMessageShown) {
+      return;
+    }
+
+    this.isMessageShown = showMessage(
+      this.getUnseenStaticMessages(),
       this.Messages,
       this.confirmMessage.bind(this),
-      this.voteForMessage.bind(this)
+      this.voteForMessage.bind(this),
+      this.updateLastSeenStaticMessage.bind(this)
     );
   },
 
@@ -970,6 +1164,8 @@ ${textContent}
       'Thanks for the confirmation!'
     );
 
+    this.isMessageShown = false;
+
     return true;
   },
 
@@ -990,6 +1186,30 @@ ${textContent}
       );
       return false;
     }
+
+    this.isMessageShown = false;
+
+    return true;
+  },
+
+  /**
+   * Update last seen static message using localStorage
+   *
+   * @param {string} MessageID
+   * @returns boolean Whether the last seen static message was updated successfully
+   */
+  updateLastSeenStaticMessage(MessageID) {
+    try {
+      localStorage.setItem(lastSeenStaticMessageKey, MessageID);
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Something went wrong. Please try again.'
+      );
+      return false;
+    }
+
+    this.isMessageShown = false;
 
     return true;
   },
@@ -1839,13 +2059,15 @@ ${textContent}
 
   // This function is called for each new element added to the document body
   async handleElementAdded(e) {
+    const selectorConfig = this.Config.getSelectorConfig();
+
     // If watermark is enabled, add corresponding classes
     this.addWatermark();
 
     // If the element added is the root element for the chat sidebar, set up the sidebar
     if (
-      e.id === 'headlessui-portal-root' ||
-      e.id === 'language-select-wrapper'
+      e.id === selectorConfig.ElementAddedSidebarID1 ||
+      e.id === selectorConfig.ElementAddedSidebarID2
     ) {
       this.setupSidebar();
       return;
@@ -1854,7 +2076,7 @@ ${textContent}
     // Disable "Export Button" when no chat were started.
     // Insert "Prompt Templates" section to the main page.
     // Insert language select and continue button above the prompt textarea input
-    if (e.querySelector('h1.text-4xl')) {
+    if (e.querySelector(selectorConfig.ElementAddedExportButtonDisable)) {
       await this.insertPromptTemplatesSection();
 
       const button = document.getElementById('export-button');
@@ -1866,7 +2088,7 @@ ${textContent}
 
     // Enable "Export Button" when a new chat started.
     // Insert language select and continue button above the prompt textarea input
-    if (document.querySelector('.text-base.xl\\:max-w-3xl')) {
+    if (document.querySelector(selectorConfig.ElementAddedExportButtonEnable)) {
       const button = document.getElementById('export-button');
       if (button) button.style = '';
 
@@ -1875,7 +2097,9 @@ ${textContent}
     }
 
     // Add "Save prompt as template" button, if new prompt was added
-    if (document.querySelector('.whitespace-pre-wrap')) {
+    if (
+      document.querySelector(selectorConfig.ElementAddedSavePromptAsTemplate)
+    ) {
       this.insertSavePromptAsTemplateButton();
 
       this.insertPromptTemplatesSidebar();
@@ -1999,13 +2223,8 @@ ${textContent}
         `;
 
     // Add sidebar icon and sidebar to the page
-    document
-      .querySelector('.flex.flex-col.text-sm.dark\\:bg-gray-800')
-      .appendChild(sidebarIcon);
-
-    document
-      .querySelector('.flex.flex-col.text-sm.dark\\:bg-gray-800')
-      .appendChild(sidebar);
+    document.querySelector(selectorConfig.Sidebar).appendChild(sidebarIcon);
+    document.querySelector(selectorConfig.Sidebar).appendChild(sidebar);
   },
 
   updateShareButton() {
@@ -2783,11 +3002,13 @@ ${textContent}
       // get the parent element of the button (the prompt container)
       const prompt =
         button.parentElement.parentElement.parentElement.querySelector(
-          '.whitespace-pre-wrap'
+          this.Config.getSelectorConfig().SavePromptAsTemplatePromptText
         );
 
       if (prompt) {
         promptTemplate = prompt.textContent;
+      } else {
+        console.error('showSavePromptModal: No prompt text found');
       }
     }
 
@@ -3174,8 +3395,10 @@ ${textContent}
 
   // This function adds an "Export Button" to the sidebar
   addExportButton() {
+    const selectorConfig = this.Config.getSelectorConfig();
+
     // Get the nav element in the sidebar
-    const nav = document.querySelector('nav');
+    const nav = document.querySelector(selectorConfig.ExportButton);
     // If there is no nav element or the "Export Button" already exists, skip
     if (!nav || nav.querySelector('#export-button')) return;
 
@@ -3187,7 +3410,7 @@ ${textContent}
     button.onclick = this.exportCurrentChat.bind(this);
 
     // If there is no chat started, disable the button
-    if (document.querySelector('.flex-1.overflow-hidden h1')) {
+    if (document.querySelector(selectorConfig.ExportButtonChatStarted)) {
       button.style = 'pointer-events: none;opacity: 0.5';
     }
 
@@ -3227,15 +3450,17 @@ ${textContent}
 
   // This function gets the "New Chat" buttons
   getNewChatButtons() {
+    const selectorConfig = this.Config.getSelectorConfig();
+
     // Get the sidebar and topbar elements
-    const sidebar = document.querySelector('nav');
-    const topbar = document.querySelector('.sticky');
+    const sidebar = document.querySelector(selectorConfig.NewChatSidebar);
+    const topbar = document.querySelector(selectorConfig.NewChatTopbar);
     // Get the "New Chat" button in the sidebar
     const newChatButton = [
-      ...(sidebar?.querySelectorAll('.cursor-pointer') ?? []),
-    ].find((e) => e.innerText === 'New chat');
+      ...(sidebar?.querySelectorAll(selectorConfig.NewChatSidebarButton) ?? []),
+    ].find((e) => e.innerText === selectorConfig.NewChatSidebarButtonText);
     // Get the "Plus" button in the topbar
-    const AddButton = topbar?.querySelector('button.px-3');
+    const AddButton = topbar?.querySelector(selectorConfig.NewChatTopbarButton);
     // Return an array containing the buttons, filtering out any null elements
     return [newChatButton, AddButton].filter((button) => button);
   },
@@ -4662,10 +4887,10 @@ ${textContent}
       return;
     }
 
+    const selectorConfig = this.Config.getSelectorConfig();
+
     // Get the prompt textarea input
-    const textarea = document.querySelector(
-      `form textarea:not([name^="${variableIDPrefix}"])`
-    );
+    const textarea = document.querySelector(selectorConfig.PromptTextarea);
 
     // If there is no textarea, skip
     if (!textarea) {
@@ -4674,7 +4899,7 @@ ${textContent}
     }
 
     // Hide the spacer for absolutely positioned prompt input
-    const spacer = document.querySelector('.h-32.md\\:h-48.flex-shrink-0');
+    const spacer = document.querySelector(selectorConfig.LangWrapperSpacer);
 
     if (spacer) {
       spacer.style = 'display: none';
@@ -4850,10 +5075,10 @@ ${textContent}
 
   // Insert the "Include My Profile info" below prompt textarea
   insertIncludeMyProfileInfo() {
+    const selectorConfig = this.Config.getSelectorConfig();
+
     // Get the prompt textarea input
-    const textarea = document.querySelector(
-      `form textarea:not([name^="${variableIDPrefix}"])`
-    );
+    const textarea = document.querySelector(selectorConfig.PromptTextarea);
 
     // If there is no textarea, skip
     if (!textarea) {
@@ -4862,8 +5087,7 @@ ${textContent}
     }
 
     // select last button element for parent element of textarea
-    let buttons = textarea.parentElement.querySelectorAll('button');
-    let button = buttons && buttons.length ? buttons[buttons.length - 1] : null;
+    let button = document.querySelector(selectorConfig.PromptSubmitButton);
 
     // If the button is not found, skip
     if (
@@ -5098,9 +5322,9 @@ ${textContent}
 
   // Submit the continue action prompt to ChatGPT
   submitContinueActionPrompt(prompt = '') {
-    const textarea = document.querySelector(
-      `form textarea:not([name^="${variableIDPrefix}"])`
-    );
+    const selectorConfig = this.Config.getSelectorConfig();
+
+    const textarea = document.querySelector(selectorConfig.PromptTextarea);
 
     // If the textarea is not empty and it's not "Continue writing please" - ask for confirmation
     if (
@@ -5121,13 +5345,7 @@ ${textContent}
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
 
     // select last button element for parent element of textarea
-    let buttons = textarea.parentElement.querySelectorAll('button');
-    let button = buttons && buttons.length ? buttons[buttons.length - 1] : null;
-
-    // Enable button if it's disabled
-    if (button.disabled) {
-      button.disabled = false;
-    }
+    let button = document.querySelector(selectorConfig.PromptSubmitButton);
 
     // If the button is not found, skip
     if (
@@ -5135,7 +5353,13 @@ ${textContent}
       !button.tagName ||
       button.tagName.toLowerCase() !== 'button'
     ) {
+      console.error('submitContinueActionPrompt: No button found');
       return;
+    }
+
+    // Enable button if it's disabled
+    if (button.disabled) {
+      button.disabled = false;
     }
 
     // Click the "Submit" button with a delay of 500ms
@@ -5211,7 +5435,9 @@ ${textContent}
     ];
 
     let markdown = blocks.map((block) => {
-      let wrapper = block.querySelector('.whitespace-pre-wrap');
+      let wrapper = block.querySelector(
+        selectorConfig.ConversationResponseWrapper
+      );
 
       if (!wrapper) {
         return '';
@@ -5801,7 +6027,7 @@ ${textContent}
     }
 
     const textarea = document.querySelector(
-      `textarea:not([name^="${variableIDPrefix}"])`
+      this.Config.getSelectorConfig().PromptTextarea
     );
 
     if (!textarea) {
@@ -7557,7 +7783,7 @@ ${textContent}
 
     // Get the prompt textarea input
     const textarea = document.querySelector(
-      `form textarea:not([name^="${variableIDPrefix}"])`
+      this.Config.getSelectorConfig().PromptTextarea
     );
 
     // If there is no textarea, skip
