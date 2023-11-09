@@ -14,7 +14,6 @@ import {
   ModelFeedURL,
   CrawledSourcePlaceholder,
   CrawledTextPlaceholder,
-  EndpointConversation,
   ExportFilePrefix,
   ExportHeaderPrefix,
   LanguageFeedURL,
@@ -1819,8 +1818,19 @@ ${textContent}
 
   replaceFetch() {
     window.fetch = async (...t) => {
+      // Switch to the original fetch function if prompt templates are disabled
+      if (!this.Config.arePromptTemplatesEnabled()) {
+        return this.fetch(...t);
+      }
+
+      // Get the endpoint pattern for the chat backend API
+      const EndpointConversation =
+        this.Config.getPromptTemplatesConfig().EndpointConversation;
+
       // If the request is not for the chat backend API, just use the original fetch function
-      if (t[0] !== EndpointConversation) return this.fetch(...t);
+      if (!t[0] || !t[0].match(EndpointConversation)) {
+        return this.fetch(...t);
+      }
 
       // If no prompt template, tone, writing style or target language has been selected,
       // use only the profile message or the original fetch function if the profile message is not needed

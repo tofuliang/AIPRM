@@ -72,7 +72,6 @@ const ContinueActionsFeedURL =
 const ModelFeedURL = 'https://api.aiprm.com/csv/models-20230612.csv?v=';
 const PromptBuilderFeedURL =
   'https://api.aiprm.com/csv/prompt_builder-20230811.csv?v=';
-const EndpointConversation = 'https://chat.openai.com/backend-api/conversation';
 const AppShort = 'AIPRM';
 const AppName = 'AIPRM for ChatGPT';
 const AppSlogan = 'AIPRM - ChatGPT Prompts';
@@ -100,7 +99,6 @@ export {
   VariablePlaceholder,
   VariableDefinition,
   LanguageFeedURL,
-  EndpointConversation,
   AppShort,
   AppName,
   AppSlogan,
@@ -167,7 +165,9 @@ export {
 
 /** @typedef {{PromptTemplates: LayoutChangeConfig[], General: LayoutChangeConfig[]}} LayoutChangesConfig */
 
-/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig}, Selectors: SelectorConfig, LayoutChanges: LayoutChangesConfig}} RemoteConfig */
+/** @typedef {{Enabled: boolean, Config: {EndpointConversation: string}}} PromptTemplatesConfig */
+
+/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig, PromptTemplates: PromptTemplatesConfig}, Selectors: SelectorConfig, LayoutChanges: LayoutChangesConfig}} RemoteConfig */
 
 export class Config {
   /** @type {RemoteConfig} */
@@ -186,6 +186,16 @@ export class Config {
   /** @returns {LiveCrawlingConfig['Config']} */
   getLiveCrawlingConfig() {
     return this.#config.Features.LiveCrawling.Config;
+  }
+
+  /** @returns {boolean} */
+  arePromptTemplatesEnabled() {
+    return this.#config.Features.PromptTemplates.Enabled === true;
+  }
+
+  /** @returns {PromptTemplatesConfig['Config']} */
+  getPromptTemplatesConfig() {
+    return this.#config.Features.PromptTemplates.Config;
   }
 
   /** @returns {boolean} */
