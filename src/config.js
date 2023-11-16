@@ -6,7 +6,7 @@ const getEnvironmentConfig = () => {
   switch (currentEnvironment) {
     case 'production':
       return {
-        APIEndpoint: 'https://api.aiprm.com/api5',
+        APIEndpoint: 'https://api.aiprm.com/api6',
         APIEndpointAPP: 'https://app1.aiprm.com/api',
         AppAccountURL: 'https://app1.aiprm.com/account',
         AppPricingURL: 'https://app1.aiprm.com/pricing',
@@ -33,7 +33,7 @@ const getEnvironmentConfig = () => {
       };
     default:
       return {
-        APIEndpoint: 'https://api.aiprm.com/api5',
+        APIEndpoint: 'https://api.aiprm.com/api6',
         APIEndpointAPP: 'https://app1.aiprm.com/api',
         AppAccountURL: 'https://app1.aiprm.com/account',
         AppPricingURL: 'https://app1.aiprm.com/pricing',
@@ -85,7 +85,7 @@ const AppCommunityForumURL =
   'https://forum.aiprm.com/categories?via=chatgpt&utm_campaign=community&utm_source=chatgpt&utm_medium=navlink&utm_content=AIPRMcommunity';
 const QuotaMessagesURL =
   'https://api.aiprm.com/json/quota-messages-20230324.json?v=';
-const ConfigURL = 'https://api.aiprm.com/json/config-20230324.json?v=';
+const ConfigURL = 'https://api.aiprm.com/json/config-20231111.json?v=';
 
 const ValidateVariableMaxCount = 6;
 const ValidateVariablePlaceholder = /\[VARIABLE([0-9]+)\]/g;
@@ -159,6 +159,8 @@ export {
  * @property {string} ElementAddedSavePromptAsTemplate
  * @property {string} LangWrapperSpacer
  * @property {string} SavePromptAsTemplatePromptText
+ * @property {string} GizmosTitle
+ * @property {number} GizmosTitleIndex
  */
 
 /** @typedef {{Selector: string, Add: string[], Remove: string[]}} LayoutChangeConfig */

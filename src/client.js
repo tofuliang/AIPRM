@@ -17,6 +17,7 @@ import {
   ItemStatusNo,
   MemberRoleNo,
   LicenseWarningLevelNo,
+  GizmoVoteTypeNo,
 } from './enums.js';
 /* eslint-enable */
 
@@ -52,6 +53,7 @@ import { Reaction } from './rxn.js';
  * @typedef {object} AIPRMClient
  * @property {string} APIEndpoint
  * @property {User} User
+ * @property {string} AccessToken
  * @property {UserQuota} UserQuota
  * @property {UserTeamM} UserTeamM
  * @property {UserTeam[]} OwnTeamS    // Team where user is owner or admin
@@ -85,6 +87,10 @@ import { Reaction } from './rxn.js';
  * @property {(ListID: string, PromptID: string) => Promise<ListItem>} addToList
  * @property {(ListID: List['ID'], PromptID: import('./inject.js').Prompt['ID']) => Promise<void>} removeFromList
  * @property {(myProfileInfo: string) => Promise<SubPrompt>} createMyProfileInfo
+ * @property {(SortModeNo: SortModeNo) => Promise<Gizmo[]>} getGizmos
+ * @property {(GizmoCode: string, GizmoVoteTypeNo: GizmoVoteTypeNo, GizmoConfig?: Object) => Promise<void>} useGizmo
+ * @property {(GizmoCode: string, Vote: 1|-1) => Promise<void>} voteForGizmo
+ * @property {(GizmoConfig: Object) => Promise<void>} submitNewGizmo
  * @property {(response: Response) => Promise<any>} handleResponse
  */
 
@@ -94,6 +100,8 @@ const AIPRMClient = {
 
   /** @type {User} */
   User: null,
+
+  AccessToken: null,
 
   /** @type {UserQuota} */
   UserQuota: null,
@@ -127,6 +135,8 @@ const AIPRMClient = {
             MaxNewPublicPromptsAllowed: 0,
             IsLinked: false,
           };
+
+          this.AccessToken = res.accessToken;
         })
         // check user status
         .then(() => this.checkUserStatus())
@@ -800,6 +810,80 @@ const AIPRMClient = {
         Prompt: myProfileInfo,
         User: this.User,
       }),
+    }).then(this.handleResponse);
+  },
+
+  /**
+   * Fetch the gizmos using AIPRM API endpoint
+   * @param {SortModeNo} SortModeNo
+   * @returns {Promise<Gizmo[]>}
+   */
+  getGizmos(SortModeNo) {
+    return fetch(
+      `${this.APIEndpoint}/Gizmos?OperatorID=${this.User.ExternalID}&SystemNo=${this.User.ExternalSystemNo}&SortModeNo=${SortModeNo}`
+    ).then(this.handleResponse);
+  },
+
+  /**
+   * Track gizmo usage using AIPRM API endpoint
+   *
+   * @param {string} GizmoCode
+   * @param {GizmoVoteTypeNo} GizmoVoteTypeNo
+   * @param {Object} GizmoConfig
+   */
+  useGizmo(GizmoCode, GizmoVoteTypeNo, GizmoConfig = undefined) {
+    const requestBody = {
+      VoteTypeNo: GizmoVoteTypeNo,
+      Vote: 1,
+      User: this.User,
+    };
+
+    if (GizmoConfig) {
+      requestBody.LogJSON = JSON.stringify(GizmoConfig);
+    }
+
+    return fetch(`${this.APIEndpoint}/Gizmos/${GizmoCode}/Vote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    }).then(this.handleResponse);
+  },
+
+  /**
+   * Vote for a gizmo using AIPRM API endpoint
+   *
+   * @param {string} GizmoCode
+   * @param {1|-1} Vote
+   */
+  voteForGizmo(GizmoCode, Vote) {
+    return fetch(`${this.APIEndpoint}/Gizmos/${GizmoCode}/Vote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        VoteTypeNo: GizmoVoteTypeNo.TEASER_THUMBS,
+        Vote: Vote,
+        User: this.User,
+      }),
+    }).then(this.handleResponse);
+  },
+
+  // Submit new gizmo using AIPRM API endpoint
+  submitNewGizmo(gizmoConfig) {
+    const mybody = JSON.stringify({
+      Gizmo: JSON.stringify(gizmoConfig),
+      User: this.User,
+    });
+
+    return fetch(`${this.APIEndpoint}/Gizmos`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: mybody,
     }).then(this.handleResponse);
   },
 

@@ -50,6 +50,7 @@ import {
   LayoutChangeType,
   CreatePromptMode,
   LicenseWarningLevelNo,
+  GizmoVoteTypeNo,
 } from './enums.js';
 /* eslint-enable */
 
@@ -126,6 +127,30 @@ import { VERSION } from './version.js';
 
 /** @typedef {{EnumMaxSizeError: boolean, Errors: string[]}} ValidatePromptVariablesResult */
 
+/**
+ * @typedef {Object} Gizmo
+ * @property {string} GizmoID
+ * @property {string} GizmoCode
+ * @property {string} Title
+ * @property {string} Description
+ * @property {string} LogoURL
+ * @property {string} ShortURL
+ * @property {string} ShareRecipient
+ * @property {string} AuthorDisplayName
+ * @property {string} AuthorDisplayNo
+ * @property {string} AuthorVerifiedNo
+ * @property {string} ModelCode
+ * @property {string} ModelSlug
+ * @property {string[]} CategoryAuto
+ * @property {string[]} CategoryS
+ * @property {string[]} PromptStarterS
+ * @property {string[]} TagS
+ * @property {string[]} ToolsEnabledS
+ * @property {number} CountUses
+ * @property {number} CountViews
+ * @property {number} CountVotes
+ */
+
 const DefaultPromptActivity = 'all';
 const DefaultPromptTopic = 'all';
 const DefaultTargetLanguage = 'English*';
@@ -135,6 +160,7 @@ const lastPromptTopicKey = 'lastPromptTopic';
 const lastPromptModelKey = 'lastPromptModel';
 const lastTargetLanguageKey = 'lastTargetLanguage';
 const lastPageSizeKey = 'lastPageSize';
+const lastGizmoPageSizeKey = 'lastGizmoPageSize';
 const lastPromptTemplateTypeKey = 'lastPromptTemplateType';
 const lastListIDKey = 'lastListID';
 const lastCreatePromptModeKey = 'lastCreatePromptMode';
@@ -241,11 +267,17 @@ window.AIPRM = {
   /** @type {SortModeNo} */
   PromptSortMode: SortModeNo.TOP_VOTES_TRENDING,
 
+  /** @type {SortModeNo} */
+  GizmoSortMode: SortModeNo.TOP_VOTES_TRENDING,
+
   // Set default model
   PromptModel: localStorage.getItem(lastPromptModelKey) || DefaultPromptModel,
 
   // Set default search query
   PromptSearch: '',
+
+  // Set default gizmo search query
+  GizmoSearch: '',
 
   // Set default prompt templates type
   /** @type {PromptTemplatesType} */
@@ -260,6 +292,9 @@ window.AIPRM = {
 
   /** @type {Prompt[]} */
   PromptTemplates: [],
+
+  /** @type {Gizmo[]} */
+  Gizmos: [],
 
   /** @type {Prompt[]} */
   OwnPrompts: [],
@@ -310,6 +345,12 @@ window.AIPRM = {
   PromptTemplateSection: {
     currentPage: 0, // The current page number
     pageSize: +localStorage.getItem(lastPageSizeKey) || pageSizeDefault, // The number of prompts per page
+  },
+
+  // This object contains properties for the gizmo section
+  GizmoSection: {
+    currentPage: 0, // The current page number
+    pageSize: +localStorage.getItem(lastGizmoPageSizeKey) || pageSizeDefault, // The number of prompts per page
   },
 
   /** @type {?Prompt} */
@@ -471,7 +512,7 @@ window.AIPRM = {
 
     /**
      * Wait for prompt templates, lists, topics, activities, config from remote JSON file,
-     * languages, messages and optional client initialization (if not initialized yet)
+     * languages, messages, gizmos and optional client initialization (if not initialized yet)
      */
     await Promise.all([
       this.fetchPromptTemplates(false),
@@ -483,6 +524,7 @@ window.AIPRM = {
       this.fetchMessages(false),
       this.fetchModels(),
       this.fetchPromptBuilderConfig(),
+      this.fetchGizmos(false),
       clientInitialized ? Promise.resolve() : this.Client.init(),
     ]);
 
@@ -506,6 +548,8 @@ window.AIPRM = {
     this.loadPromptTemplateTypeAndListFromLocalStorage();
 
     this.insertPromptTemplatesSection();
+
+    this.insertGizmosSection();
 
     // Wait for tones, writing styles and continue actions
     await Promise.all([
@@ -1754,6 +1798,23 @@ ${textContent}
     }
   },
 
+  // Fetch gizmos using the AIPRM API client
+  async fetchGizmos(render = true) {
+    try {
+      this.Gizmos = await this.Client.getGizmos(this.GizmoSortMode);
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        `Could not load GPTs. ${error instanceof Reaction ? error.message : ''}`
+      );
+      return;
+    }
+
+    if (render) {
+      this.insertGizmosSection();
+    }
+  },
+
   /**
    * Check if a template is for model
    *
@@ -1832,6 +1893,59 @@ ${textContent}
         return this.fetch(...t);
       }
 
+      // Options object for the request
+      let options;
+
+      // Request body
+      let body;
+
+      // Index of the message part in the request body
+      let messagePartIndex;
+
+      // Prompt from the request body
+      let prompt;
+
+      try {
+        // Get the options object for the request, which includes the request body
+        options = t[1];
+
+        // Parse the request body from JSON
+        body = JSON.parse(options.body);
+
+        // Track Gizmo usage
+        if (
+          body?.conversation_mode?.gizmo &&
+          body?.conversation_mode?.gizmo_id
+        ) {
+          // The first message in the conversation
+          if (!body?.conversation_id) {
+            this.Client.useGizmo(
+              body.conversation_mode.gizmo_id,
+              GizmoVoteTypeNo.USE_ONCE,
+              {
+                conversation_mode: body.conversation_mode,
+                model: body.model,
+              }
+            );
+          }
+
+          // All other messages in the conversation
+          this.Client.useGizmo(
+            body.conversation_mode.gizmo_id,
+            GizmoVoteTypeNo.USE_MESSAGE
+          );
+        }
+
+        // Get the index of the message part in the request body
+        messagePartIndex = this.findMessagePartIndex(body.messages[0]);
+
+        // Get the prompt from the request body
+        prompt = body.messages[0].content.parts[messagePartIndex];
+      } catch (error) {
+        console.error('replaceFetch: Error parsing request body', error);
+        return this.fetch(...t);
+      }
+
       // If no prompt template, tone, writing style or target language has been selected,
       // use only the profile message or the original fetch function if the profile message is not needed
       if (
@@ -1849,15 +1963,6 @@ ${textContent}
         }
 
         try {
-          // Get the options object for the request, which includes the request body
-          const options = t[1];
-
-          // Parse the request body from JSON
-          const body = JSON.parse(options.body);
-
-          // Get the index of the message part in the request body
-          const messagePartIndex = this.findMessagePartIndex(body.messages[0]);
-
           const myProfileInfo = this.MyProfileInfos
             ? this.MyProfileInfos.find(
                 (myProfileInfo) =>
@@ -1900,18 +2005,7 @@ ${textContent}
       this.showContinueActionsButton();
 
       try {
-        // Get the options object for the request, which includes the request body
-        const options = t[1];
-        // Parse the request body from JSON
-        const body = JSON.parse(options.body);
-
-        // Get the index of the message part in the request body
-        const messagePartIndex = this.findMessagePartIndex(body.messages[0]);
-
         if (template) {
-          // Get the prompt from the request body
-          const prompt = body.messages[0].content.parts[messagePartIndex];
-
           // Use the default target language if no target language has been selected
           const targetLanguage = (
             this.TargetLanguage ? this.TargetLanguage : DefaultTargetLanguage
@@ -2120,6 +2214,272 @@ ${textContent}
 
     // Apply general layout changes based on config
     this.applyLayoutChanges();
+
+    // Add GPTs
+    if (e.querySelector(selectorConfig.GizmosTitle)) {
+      this.insertGizmosSection();
+    }
+  },
+
+  // Insert GPTs
+  insertGizmosSection() {
+    const selectorConfig = this.Config.getSelectorConfig();
+
+    const titles = document.querySelectorAll(selectorConfig.GizmosTitle);
+
+    // if there are no titles, then return (not GPTs page)
+    if (!titles || titles.length <= selectorConfig.GizmosTitleIndex) {
+      return;
+    }
+
+    // Use the second title as the reference element
+    const firstElement = titles[selectorConfig.GizmosTitleIndex];
+
+    // find parent of container and add GPTs before it
+    const parent = firstElement.parentElement;
+
+    if (!parent) {
+      return;
+    }
+
+    // find GPTs container
+    let gptsContainer = document.getElementById('AIPRM__gpts-container');
+
+    // create GPTs container if it doesn't exist
+    if (!gptsContainer) {
+      gptsContainer = document.createElement('div');
+      gptsContainer.id = 'AIPRM__gpts-container';
+      gptsContainer.className = '';
+
+      // add GPTs container before parent
+      parent.insertBefore(gptsContainer, firstElement);
+    }
+
+    // Get the current page number and page size
+    const { currentPage, pageSize } = this.GizmoSection;
+
+    let gizmos = this.filterGizmos(this.Gizmos);
+
+    // Calculate the start and end indices of the current page of GPTs
+    const start = pageSize * currentPage;
+    const end = Math.min(pageSize * (currentPage + 1), gizmos.length);
+
+    // Get the GPTs for the current page
+    const gptsForPage = gizmos.slice(start, end);
+
+    const paginationContainer = /*html*/ `
+      <div class="AIPRM__flex AIPRM__flex-1 AIPRM__gap-3.5 AIPRM__justify-between AIPRM__items-center AIPRM__flex-col sm:AIPRM__flex-row AIPRM__mt-10 AIPRM__my-4">
+        <div class="AIPRM__text-left" style="margin-top: -1rem;">
+          <label class="AIPRM__block AIPRM__text-sm AIPRM__font-medium" title="The number of GPTs per page">GPTs per Page</label>
+          <select class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900 gizmosPageSizeSelect">
+            ${pageSizeOptions
+              .map(
+                (pageSize) => /*html*/ `
+                  <option value="${pageSize}" ${
+                  pageSize === this.GizmoSection.pageSize ? 'selected' : ''
+                }>${pageSize}</option>`
+              )
+              .join('')}
+          </select>
+        </div>
+        
+        <span class="${css`paginationText`}">
+          Showing <span class="${css`paginationNumber`}">${
+      start + 1
+    }</span> to <span class="${css`paginationNumber`}">${end}</span> of <span class="${css`paginationNumber`}">${
+      gizmos.length
+    } GPTs</span>
+        </span>
+        <div class="${css`paginationButtonGroup`}">
+          <button onclick="AIPRM.prevGizmosPage()" class="${css`paginationButton`} AIPRM__text-sm" style="border-radius: 6px 0 0 6px">Prev</button>
+          <button onclick="AIPRM.nextGizmosPage()" class="${css`paginationButton`} AIPRM__border-0 AIPRM__border-l AIPRM__border-gray-500 AIPRM__text-sm" style="border-radius: 0 6px 6px 0">Next</button>
+        </div>
+      </div>`;
+
+    // add GPTs to GPTs container
+    gptsContainer.innerHTML = /*html*/ `
+      <div class="AIPRM__text-2xl AIPRM__font-bold">AIPRM Community GPTs</div>
+           
+      <div class="AIPRM__grid AIPRM__grid-cols-2 lg:AIPRM__flex AIPRM__flex-row AIPRM__gap-3 AIPRM__items-end AIPRM__justify-between AIPRM__mt-3 AIPRM__w-full md:last:AIPRM__mb-6 AIPRM__pt-2 AIPRM__stretch AIPRM__text-left AIPRM__text-sm">
+        <div>
+          <label for="gizmoSortBySelect" class="AIPRM__block AIPRM__text-sm AIPRM__font-medium">Sort by</label>
+      
+          <select id="gizmoSortBySelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900">
+            ${Object.keys(SortModeNo)
+              .map(
+                (sortMode) => /*html*/ `
+                <option value="${SortModeNo[sortMode]}" ${
+                  this.GizmoSortMode === SortModeNo[sortMode] ? 'selected' : ''
+                }>${capitalizeWords(sortMode.replaceAll('_', ' '))}</option>`
+              )
+              .join('')}
+          </select>
+        </div>
+        
+        <div class="AIPRM__whitespace-nowrap AIPRM__flex">
+          <button title="Submit a new GPT" 
+            onclick="event.preventDefault(); AIPRM.submitNewGPT()" 
+            class="AIPRM__rounded AIPRM__justify-center AIPRM__items-center AIPRM__hidden lg:AIPRM__inline-block AIPRM__mr-1 AIPRM__p-2 AIPRM__px-2.5 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+            ${svg('Plus')}
+          </button>
+          <input id="gizmoSearchInput" type="search" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__inline-block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 lg:AIPRM__w-[260px]" placeholder="Search" 
+            value="${sanitizeInput(
+              this.GizmoSearch
+            )}" onfocus="this.value = this.value">          
+        </div>
+
+        <div class="lg:AIPRM__hidden AIPRM__col-start-2">
+          <button title="Submit a new GPT" 
+            onclick="event.preventDefault(); AIPRM.submitNewGPT()" 
+            class="AIPRM__text-sm AIPRM__rounded AIPRM__w-full AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+            ${svg('Plus')} &nbsp; Submit a new GPT
+          </button>
+        </div>
+      </div>
+      
+      <div class="AIPRM__mb-10 AIPRM__mt-4">        
+
+        ${gizmos.length > this.GizmoSection.pageSize ? paginationContainer : ''}
+        
+        ${
+          gizmos.length === 0
+            ? /*html*/ `
+              <div class="AIPRM__w-full AIPRM__my-8 AIPRM__text-center">
+                <div class="AIPRM__font-semibold AIPRM__text-xl">No GPTs found for your current filter.</div>
+                <div class="AIPRM__text-sm">Please reset your filters to view all GPTs.</div>
+                <a class="AIPRM__underline AIPRM__text-sm" href="#" title="Reset filters" onclick="event.stopPropagation(); AIPRM.resetGizmoFilters();">Click here to reset filters</a>
+              </div>
+            `
+            : ''
+        }
+
+        <ul class="AIPRM__gap-3.5 AIPRM__grid AIPRM__grid-cols-1 lg:AIPRM__grid-cols-2 AIPRM__mb-4">
+          ${gptsForPage
+            .map((gpt) => {
+              return /*html*/ `
+                <button class="AIPRM__flex AIPRM__flex-col AIPRM__gap-2 AIPRM__w-full AIPRM__bg-gray-50 dark:AIPRM__bg-white/5 AIPRM__p-4 AIPRM__rounded-md hover:AIPRM__bg-gray-200 dark:hover:AIPRM__bg-gray-900 AIPRM__text-left AIPRM__relative AIPRM__group" onclick="AIPRM.selectGizmo('${sanitizeInput(
+                  gpt.ShortURL
+                )}')">
+                  <div class="flex AIPRM__gap-6 AIPRM__w-full AIPRM__justify-between">
+                    <div class="AIPRM__w-4/5 AIPRM__min-w-0">
+                      <h3 class="AIPRM__m-0 AIPRM__text-gray-900 dark:AIPRM__text-gray-100 AIPRM__text-xl" style="overflow-wrap: anywhere;">
+                        ${sanitizeInput(gpt.Title)}
+                      </h3>
+
+                      <div class="AIPRM__text-gray-500 AIPRM__text-xs AIPRM__flex AIPRM__pb-1 AIPRM__max-w-full">
+                          by <span class="AIPRM__mx-1 AIPRM__overflow-hidden AIPRM__text-ellipsis AIPRM__flex-1 AIPRM__whitespace-nowrap" title="Created by ${sanitizeInput(
+                            gpt.AuthorDisplayName || 'Anonymous'
+                          )}">
+                            ${sanitizeInput(
+                              gpt.AuthorDisplayName || 'Anonymous'
+                            )}
+                          </span>
+                      </div>
+
+                      <p class="AIPRM__m-0 AIPRM__text-gray-500 AIPRM__text-gray-600 dark:AIPRM__text-gray-200 AIPRM__overflow-hidden AIPRM__text-ellipsis text-sm AIPRM__mt-2" style="display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere;" title="${sanitizeInput(
+                        gpt.Description
+                      )}">
+                        ${sanitizeInput(gpt.Description)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <div class="AIPRM__h-[96px] AIPRM__w-[96px] AIPRM__flex-shrink-0">
+                        <div class="gizmo-shadow-stroke AIPRM__overflow-hidden AIPRM__rounded-full AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__h-full">
+                        <img
+                            src="${sanitizeInput(
+                              gpt.LogoURL
+                            )}" onerror="this.src='data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjwhRE9DVFlQRSBzdmcgUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIgImh0dHA6Ly93d3cudzMub3JnL0dyYXBoaWNzL1NWRy8xLjEvRFREL3N2ZzExLmR0ZCI+Cjxzdmcgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgdmlld0JveD0iMCAwIDE2MSAxODAiIHZlcnNpb249IjEuMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSIgeG1sbnM6c2VyaWY9Imh0dHA6Ly93d3cuc2VyaWYuY29tLyIgc3R5bGU9ImZpbGwtcnVsZTpldmVub2RkO2NsaXAtcnVsZTpldmVub2RkO3N0cm9rZS1saW5lam9pbjpyb3VuZDtzdHJva2UtbWl0ZXJsaW1pdDoyOyI+CiAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLC00NDkuODYzLC0zNTg1OC44KSI+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoMS40MTkzNCwwLDAsMS40MTkzNCwtMTg4LjQ2OSwzNTMxOCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgwLjU4MzkyMSwwLDAsMC41ODM5MjEsLTQ5My42NzQsLTE0My44MTgpIj4KICAgICAgICAgICAgICAgIDxwYXRoIGQ9Ik0xNjQxLjcyLDEwMzEuMTJMMTYyNi42OSwxMDY5LjI1TDE2NzEuNDcsMTA5NS4yN0wxNjYzLjA5LDEwNDMuMjJMMTY0MS43MiwxMDMxLjEyWiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoLTAuNTgzOTIxLDAsMCwwLjU4MzkyMSwxNTA2LjM5LC0xNDMuODE4KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMTY0MS43MiwxMDMxLjEyTDE2MjYuNjksMTA2OS4yNUwxNjcxLjQ3LDEwOTUuMjdMMTY2My4wOSwxMDQzLjIyTDE2NDEuNzIsMTAzMS4xMloiIHN0eWxlPSJmaWxsOndoaXRlOyIvPgogICAgICAgICAgICA8L2c+CiAgICAgICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KDAuNTgzOTIxLDAsMCwwLjU4MzkyMSwtNDk0LjA5LC0xNDMuMjIxKSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMTYxNi4zNiwxMDE3LjE3TDE2MTYuMzYsMTA2Mi4yOEwxNjMxLjQ4LDEwMjUuMTRMMTYxNi4zNiwxMDE3LjE3WiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoLTAuNTgzOTIxLDAsMCwwLjU4MzkyMSwxNTA2LjgxLC0xNDMuMjIxKSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMTYxNi4zNiwxMDE3LjE3TDE2MTYuMzYsMTA2Mi4yOEwxNjMxLjQ4LDEwMjUuMTRMMTYxNi4zNiwxMDE3LjE3WiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoMC41MDg5NjEsMCwwLDAuNTgzOTIxLC0zNjguMDA4LC0yMTUuNDYpIj4KICAgICAgICAgICAgICAgIDxwYXRoIGQ9Ik0xNjg5LjUyLDEwMzEuOThMMTcxMC4xOSwxMDIxLjUzTDE3MTAuMTksMTExNi4yNkwxNjg5LjI3LDExMDQuOTFMMTY4OS41MiwxMDMxLjk4WiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoLTAuNTA4OTYxLDAsMCwwLjU4MzkyMSwxMzgwLjczLC0yMTUuNDYpIj4KICAgICAgICAgICAgICAgIDxwYXRoIGQ9Ik0xNjg5LjUyLDEwMzEuOThMMTcxMC4xOSwxMDIxLjUzTDE3MTAuMTksMTExNi4yNkwxNjg5LjI3LDExMDQuOTFMMTY4OS41MiwxMDMxLjk4WiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoMC43MTMzLDAsMCwwLjU4MzkyMSwtNzE3LjQ2NiwtMTQ0LjQ1MykiPgogICAgICAgICAgICAgICAgPHBhdGggZD0iTTE2ODkuNSwxMDM5LjY3TDE2ODkuNjEsMTAzOS41OUwxNzEwLjE5LDEwMjEuNTNMMTcxMC4xOSwxMTE2LjM3TDE2ODkuMjgsMTEwMS42MkwxNjg5LjUsMTAzOS42N1oiIHN0eWxlPSJmaWxsOndoaXRlOyIvPgogICAgICAgICAgICA8L2c+CiAgICAgICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KC0wLjcxMzMsMCwwLDAuNTgzOTIxLDE3MzAuMTgsLTE0NC40NTMpIj4KICAgICAgICAgICAgICAgIDxwYXRoIGQ9Ik0xNjg5LjUsMTAzOS42N0wxNjg5LjYxLDEwMzkuNTlMMTcxMC4xOSwxMDIxLjUzTDE3MTAuMTksMTExNi4zN0wxNjg5LjI4LDExMDEuNjJMMTY4OS41LDEwMzkuNjdaIiBzdHlsZT0iZmlsbDp3aGl0ZTsiLz4KICAgICAgICAgICAgPC9nPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgwLjU4MzkyMSwwLDAsMC41ODM5MjEsLTQ5Ny4wMTIsLTE0My40NzgpIj4KICAgICAgICAgICAgICAgIDxwYXRoIGQ9Ik0xNjg1LjA0LDkxNC4xMjJMMTYzNC4xLDk0Mi4yODFMMTY3Ny4xOCw5NjYuMzE0TDE2ODUuMDQsOTE0LjEyMloiIHN0eWxlPSJmaWxsOndoaXRlOyIvPgogICAgICAgICAgICA8L2c+CiAgICAgICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KC0wLjU4MzkyMSwwLDAsMC41ODM5MjEsMTUwOS43MywtMTQzLjQ3OCkiPgogICAgICAgICAgICAgICAgPHBhdGggZD0iTTE2ODUuMDQsOTE0LjEyMkwxNjM0LjEsOTQyLjI4MUwxNjc3LjE4LDk2Ni4zMTRMMTY4NS4wNCw5MTQuMTIyWiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoMC41ODM4OTYsMC4wMDUzNTcwNiwtMC4wMDUzNTcwNiwwLjU4Mzg5NiwtNDkxLjA0OSwtMTUxLjUxKSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMTYxOS45OCw5NDkuMjM3TDE3MDguNzcsOTk5LjAxM0wxNjk0LjAyLDEwMTAuNDNMMTYyMC4xMiw5NjkuNjEyTDE2MTkuOTgsOTQ5LjIzN1oiIHN0eWxlPSJmaWxsOndoaXRlOyIvPgogICAgICAgICAgICA8L2c+CiAgICAgICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KC0wLjU4Mzg5NiwwLjAwNTM1NzA2LDAuMDA1MzU3MDYsMC41ODM4OTYsMTUwMy43NywtMTUxLjUxKSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMTYxOS45OCw5NDkuMjM3TDE3MDguNzcsOTk5LjAxM0wxNjk0LjAyLDEwMTAuNDNMMTYyMC4xMiw5NjkuNjEyTDE2MTkuOTgsOTQ5LjIzN1oiIHN0eWxlPSJmaWxsOndoaXRlOyIvPgogICAgICAgICAgICA8L2c+CiAgICAgICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KDAuNTgzODk2LDAuMDA1MzU3MDYsLTAuMDA1MzU3MDYsMC41ODM4OTYsLTQ5MS4wNDksLTEzMS45NjgpIj4KICAgICAgICAgICAgICAgIDxwYXRoIGQ9Ik0xNjE5Ljk4LDk0OS4yMzdMMTY4OS45MSw5ODguNTMxTDE2NzUuMjgsOTk5Ljk1NEwxNjIwLjEyLDk2OS42MTJMMTYxOS45OCw5NDkuMjM3WiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoLTAuNTgzODk2LDAuMDA1MzU3MDYsMC4wMDUzNTcwNiwwLjU4Mzg5NiwxNTAzLjc3LC0xMzEuOTY4KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMTYxOS45OCw5NDkuMjM3TDE2ODkuOTEsOTg4LjUzMUwxNjc1LjI4LDk5OS45NTRMMTYyMC4xMiw5NjkuNjEyTDE2MTkuOTgsOTQ5LjIzN1oiIHN0eWxlPSJmaWxsOndoaXRlOyIvPgogICAgICAgICAgICA8L2c+CiAgICAgICAgPC9nPgogICAgPC9nPgo8L3N2Zz4K'; this.classList.remove('AIPRM__h-full'); this.classList.remove('AIPRM__w-full'); this.classList.add('AIPRM__w-2/3'); this.classList.add('AIPRM__h-2/3'); this.parentElement.classList.add('AIPRM__bg-black');"
+                            class="AIPRM__h-full AIPRM__w-full" alt="GPT" width="96" height="96">
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  <div class="AIPRM__text-gray-500 AIPRM__text-xs AIPRM__flex AIPRM__pt-3 AIPRM__w-full AIPRM__justify-between AIPRM__mt-auto AIPRM__gap-2">
+                    <span class="AIPRM__flex AIPRM__items-center AIPRM__truncate" title="Views (${
+                      gpt.CountViews || 0
+                    })">
+                      <span class="AIPRM__p-1">${svg(
+                        'Eye'
+                      )}</span> &nbsp; <span class="AIPRM__truncate">${formatHumanReadableNumber(
+                gpt.CountViews || 0
+              )}</span>
+                    </span>
+
+                    <span class="AIPRM__flex AIPRM__items-center AIPRM__truncate" title="Usages (${
+                      gpt.CountUses || 0
+                    })">
+                      <span class="AIPRM__p-1">${svg(
+                        'Quote'
+                      )}</span> &nbsp; <span class="AIPRM__truncate">${formatHumanReadableNumber(
+                gpt.CountUses || 0
+              )}</span>
+                    </span>
+
+                    <span class="AIPRM__flex AIPRM__items-center AIPRM__truncate" title="Votes (${
+                      gpt.CountVotes || 0
+                    })">
+                      <a title="Votes (${
+                        gpt.CountVotes || 0
+                      }) - Vote for this GPT with thumbs up"
+                          class="AIPRM__p-1 AIPRM__rounded-md hover:AIPRM__bg-gray-100 hover:AIPRM__text-gray-700 dark:AIPRM__text-gray-400 dark:hover:AIPRM__bg-gray-700 dark:hover:AIPRM__text-gray-200 disabled:dark:hover:AIPRM__text-gray-400" onclick="event.stopPropagation(); AIPRM.voteGizmoThumbsUp('${sanitizeInput(
+                            gpt.GizmoCode
+                          )}')">${svg('ThumbUp')}</a>
+                      &nbsp; <span class="AIPRM__truncate">${formatHumanReadableNumber(
+                        gpt.CountVotes || 0
+                      )}</span>
+
+                      &nbsp; <a title="Votes (${
+                        gpt.CountVotes
+                      }) - Vote for this GPT with thumbs down"
+                            class="AIPRM__p-1 AIPRM__rounded-md hover:AIPRM__bg-gray-100 hover:AIPRM__text-gray-700 dark:AIPRM__text-gray-400 dark:hover:AIPRM__bg-gray-700 dark:hover:AIPRM__text-gray-200 disabled:dark:hover:AIPRM__text-gray-400" onclick="event.stopPropagation(); AIPRM.voteGizmoThumbsDown('${sanitizeInput(
+                              gpt.GizmoCode
+                            )}')">${svg('ThumbDown')}</a>
+                    </span>
+
+                    <span class="AIPRM__flex AIPRM__items-center" title="Copy link to this GPT">
+                      <a class="AIPRM__p-1 AIPRM__rounded-md hover:AIPRM__bg-gray-100 hover:AIPRM__text-gray-700 dark:AIPRM__text-gray-400 dark:hover:AIPRM__bg-gray-700 dark:hover:AIPRM__text-gray-200 disabled:dark:hover:AIPRM__text-gray-400" 
+                      onclick="event.stopPropagation(); AIPRM.copyGizmoDeepLink('https://chat.openai.com/g/${sanitizeInput(
+                        gpt.ShortURL
+                      )}')" title="Copy link to this GPT">
+                      ${svg('Link')}
+                      </a>
+                    </span>
+                  </div>
+                </button>`;
+            })
+            .join('')}          
+        </ul>
+
+        ${gizmos.length > this.GizmoSection.pageSize ? paginationContainer : ''}
+
+        <div class="AIPRM__h-px AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700"></div>
+      </div>
+    `;
+
+    gptsContainer
+      .querySelector('#gizmoSortBySelect')
+      .addEventListener('change', this.changeGizmoSortBy.bind(this));
+
+    gptsContainer
+      ?.querySelector('#gizmoSearchInput')
+      ?.addEventListener(
+        'input',
+        this.debounce(this.changeGizmoSearch.bind(this), 300).bind(this)
+      );
+
+    const pageSizeSelectElements = gptsContainer.querySelectorAll(
+      'select.gizmosPageSizeSelect'
+    );
+
+    // Add event listener for the pagination buttons and page size select elements
+    if (pageSizeSelectElements.length > 0) {
+      pageSizeSelectElements.forEach((select) => {
+        select.addEventListener('change', this.changeGizmoPageSize.bind(this));
+      });
+    }
   },
 
   // Apply layout changes based on config and type (general or specific only)
@@ -3553,7 +3913,31 @@ ${textContent}
           ) ||
           template.Title.toLowerCase().includes(
             this.PromptSearch.toLowerCase()
+          ) ||
+          template.AuthorName.toLowerCase().includes(
+            this.PromptSearch.toLowerCase()
           ))
+      );
+    });
+  },
+
+  /**
+   * Filter gizmos based on search query
+   *
+   * @param {Gizmo[]} gizmos
+   * @returns {Gizmo[]} filtered gizmos
+   */
+  filterGizmos(gizmos) {
+    return gizmos.filter((gizmo) => {
+      return (
+        !this.GizmoSearch ||
+        gizmo.Title.toLowerCase().includes(this.GizmoSearch.toLowerCase()) ||
+        gizmo.Description.toLowerCase().includes(
+          this.GizmoSearch.toLowerCase()
+        ) ||
+        gizmo.AuthorDisplayName.toLowerCase().includes(
+          this.GizmoSearch.toLowerCase()
+        )
       );
     });
   },
@@ -4736,6 +5120,13 @@ ${textContent}
     }
   },
 
+  resetGizmoFilters() {
+    this.GizmoSearch = '';
+    this.GizmoSection.currentPage = 0;
+
+    this.insertGizmosSection();
+  },
+
   /**
    * boundHandleArrowKey is the bound version of the handleArrowKey function
    *
@@ -4782,6 +5173,22 @@ ${textContent}
     await this.insertPromptTemplatesSection();
   },
 
+  // changeGizmoPageSize updates the this.GizmoSection.pageSize variable and re-renders the gizmos
+  async changeGizmoPageSize(e) {
+    let pageSize = +e.target.value;
+
+    // if the pageSize is not in the pageSizeOptions array, use the default pageSize option
+    pageSize = pageSizeOptions.includes(pageSize) ? pageSize : pageSizeDefault;
+
+    // persist the last selected page size in local storage
+    localStorage.setItem(lastGizmoPageSizeKey, pageSize);
+
+    this.GizmoSection.currentPage = 0;
+    this.GizmoSection.pageSize = pageSize;
+
+    this.insertGizmosSection();
+  },
+
   // changePromptTopic updates the this.PromptTopic variable and reloads the templates & messages
   async changePromptTopic(e) {
     this.PromptTopic = e.target.value;
@@ -4818,6 +5225,15 @@ ${textContent}
     this.fetchPromptTemplates();
   },
 
+  // changeGizmoSortBy updates the this.GizmoSortMode variable and reloads the gizmos
+  changeGizmoSortBy(e) {
+    this.GizmoSortMode = +e.target.value;
+
+    this.GizmoSection.currentPage = 0;
+
+    this.fetchGizmos();
+  },
+
   // changePromptModel updates the this.PromptModel variable and reloads the templates
   async changePromptModel(e) {
     this.PromptModel = e.target.value;
@@ -4844,6 +5260,23 @@ ${textContent}
       searchInput.value.length;
     searchInput.focus();
   },
+
+  // changePromptSearch updates the this.GizmoSearch variable and re-renders the gizmos
+  changeGizmoSearch(e) {
+    this.GizmoSearch = e.target.value;
+
+    this.GizmoSection.currentPage = 0;
+
+    this.insertGizmosSection();
+
+    const searchInput = document.querySelector('#gizmoSearchInput');
+
+    searchInput.selectionStart = searchInput.selectionEnd =
+      searchInput.value.length;
+
+    searchInput.focus();
+  },
+
   /**
    * changePromptTemplatesType updates PromptTemplatesType and PromptTemplatesList and re-renders the templates
    *
@@ -5433,6 +5866,38 @@ ${textContent}
     await this.insertPromptTemplatesSection();
   },
 
+  // Decrement the current page of the gizmos section and re-render
+  async prevGizmosPage() {
+    this.GizmoSection.currentPage--;
+    this.GizmoSection.currentPage = Math.max(0, this.GizmoSection.currentPage);
+
+    // Update the section
+    this.insertGizmosSection();
+  },
+
+  // nextGizmosPage increments the current page and re-renders the gizmos
+  async nextGizmosPage() {
+    let gizmos = this.Gizmos;
+
+    if (!gizmos || !Array.isArray(gizmos)) return;
+
+    // Filter templates based on selected activity and search query
+    gizmos = this.filterGizmos(gizmos);
+
+    // If there are no templates, skip
+    if (gizmos.length === 0) return;
+
+    this.GizmoSection.currentPage++;
+
+    this.GizmoSection.currentPage = Math.min(
+      Math.floor((gizmos.length - 1) / this.GizmoSection.pageSize),
+      this.GizmoSection.currentPage
+    );
+
+    // Update the section
+    this.insertGizmosSection();
+  },
+
   // Export the current chat log to a file
   exportCurrentChat() {
     // unknown prompt ID - use hardcoded prompt ID = UsageTypeNo.EXPORT
@@ -5731,6 +6196,42 @@ ${textContent}
     );
   },
 
+  // Vote for a gizmo with a thumbs up
+  async voteGizmoThumbsUp(GizmoCode) {
+    try {
+      await this.Client.voteForGizmo(GizmoCode, 1);
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Something went wrong. Please try again.'
+      );
+      return;
+    }
+
+    this.showNotification(
+      NotificationSeverity.SUCCESS,
+      'Thanks for your vote!'
+    );
+  },
+
+  // Vote for a gizmo with a thumbs down
+  async voteGizmoThumbsDown(GizmoCode) {
+    try {
+      await this.Client.voteForGizmo(GizmoCode, -1);
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Something went wrong. Please try again.'
+      );
+      return;
+    }
+
+    this.showNotification(
+      NotificationSeverity.SUCCESS,
+      'Thanks for your vote!'
+    );
+  },
+
   // Report the prompt template as inappropriate
   async reportPrompt(e) {
     // prevent the form from submitting
@@ -5793,6 +6294,27 @@ ${textContent}
         this.showNotification(
           NotificationSeverity.SUCCESS,
           'The link to the prompt template was copied to your clipboard.'
+        );
+      },
+      // error - something went wrong (permissions?)
+      () => {
+        this.showNotification(
+          NotificationSeverity.ERROR,
+          'Something went wrong. Please try again.'
+        );
+      }
+    );
+  },
+
+  // Copy link to gizmo to clipboard
+  async copyGizmoDeepLink(URL) {
+    navigator.clipboard.writeText(URL).then(
+      // successfully copied
+      () => {
+        // Success - copied
+        this.showNotification(
+          NotificationSeverity.SUCCESS,
+          'The link to the GPT was copied to your clipboard.'
         );
       },
       // error - something went wrong (permissions?)
@@ -7808,6 +8330,115 @@ ${textContent}
 
     // Dispatch the input event to trigger the event listeners and enable the "Submit" button
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  },
+
+  /**
+   * submitNewGPT asks for GPT URL first, then will parse Gizmo ID from URL,
+   * call backend API to fetch GPT config and submit new GPT with config via AIPRM API
+   */
+  async submitNewGPT() {
+    // Ask for GPT URL
+    const gptURL = prompt(
+      'Please enter the GPT URL (e.g. https://chat.openai.com/g/g-dq9i42tRO-chatxgb):'
+    );
+
+    // Abort if no URL was entered
+    if (!gptURL) {
+      return;
+    }
+
+    // Parse GPT ID from URL
+    const gptID = gptURL.split('/').pop();
+
+    // Abort if no GPT ID was parsed
+    if (!gptID) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not parse GPT ID from URL.'
+      );
+      return;
+    }
+
+    this.storeGPT(gptID);
+  },
+
+  /**
+   * storeGPT calls backend API to fetch GPT config and submits new GPT with config via AIPRM API
+   *
+   * @param {string} gptID
+   */
+  async storeGPT(gptID) {
+    let gptConfig;
+
+    try {
+      // Fetch GPT config from backend API
+      const response = await fetch(
+        `https://chat.openai.com/backend-api/gizmos/${gptID}`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.Client.AccessToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Could not fetch GPT config from backend API.');
+      }
+
+      gptConfig = await response.json();
+    } catch (error) {
+      console.error(error);
+
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not fetch GPT config from backend API. Please try to reload the page and try again.'
+      );
+      return;
+    }
+
+    // Abort if no GPT config was fetched
+    if (!gptConfig) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not fetch GPT config from backend API.'
+      );
+      return;
+    }
+
+    // Submit new GPT with config via API
+    try {
+      await this.Client.submitNewGizmo(gptConfig);
+    } catch (error) {
+      this.showNotification(
+        NotificationSeverity.ERROR,
+        'Could not submit new GPT via API.'
+      );
+      return;
+    }
+
+    // Show thanks notification
+    this.showNotification(
+      NotificationSeverity.SUCCESS,
+      'Thank you for submitting a new GPT!'
+    );
+  },
+
+  // selectGizmo selects a GPT from the list of GPTs using ShortURL and tracks the event
+  async selectGizmo(shortURL) {
+    // Abort if no shortURL was passed
+    if (!shortURL) {
+      return;
+    }
+
+    // Track the event
+    try {
+      await this.Client.useGizmo(shortURL, GizmoVoteTypeNo.VIEW);
+    } catch (error) {
+      console.error('Could not track gizmo view event', error);
+    }
+
+    // Navigate
+    window.location = `/g/${sanitizeInput(shortURL)}`;
   },
 };
 

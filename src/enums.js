@@ -77,6 +77,17 @@ const VoteTypeNo = {
 };
 
 /** @enum {number} */
+const GizmoVoteTypeNo = {
+  UNKNOWN: 0,
+  TEASER_THUMBS: 1,
+  VIEW: 2,
+  USE_ONCE: 4,
+  USE_MESSAGE: 8,
+  USE_STARTERPROMPT: 16,
+  RESULT_THUMBS: 32,
+};
+
+/** @enum {number} */
 const SortModeNo = {
   //UNKNOWN: 0, // not used & not displayed in the "Sort by" dropdown
   TOP_USAGE: 8,
@@ -243,6 +254,7 @@ export {
   FeedbackTypeNo,
   UsageTypeNo,
   VoteTypeNo,
+  GizmoVoteTypeNo,
   SortModeNo,
   MessageStatusNo,
   MessageSeverityNo,
