@@ -175,6 +175,7 @@ const lastSeenStaticMessageKey = 'AIPRM_lastSeenStaticMessage';
 const queryParamPromptID = 'AIPRM_PromptID';
 const queryParamVariable = 'AIPRM_VARIABLE';
 const queryParamPrompt = 'AIPRM_Prompt';
+const queryParamSearchTerm = 'AIPRM_Search';
 
 // The number of prompts per page in the prompt templates section
 const pageSizeOptions = [4, 8, 12, 16, 20];
@@ -546,6 +547,8 @@ window.AIPRM = {
     this.setDefaultCreatePromptMode();
 
     this.loadPromptTemplateTypeAndListFromLocalStorage();
+
+    this.initSearchTermFromParam();
 
     this.insertPromptTemplatesSection();
 
@@ -1142,6 +1145,20 @@ ${textContent}
           }
         }
       });
+    }
+  },
+
+  // get the search term from the URL and select the prompt template
+  async initSearchTermFromParam() {
+    const params = new URLSearchParams(window.location.search);
+    const paramSearchTerm = params.get(queryParamSearchTerm);
+
+    if (paramSearchTerm) {
+      if (window.location.href.match(this.Config.getEndpointGizmos())) {
+        this.GizmoSearch = paramSearchTerm;
+      } else {
+        this.PromptSearch = paramSearchTerm;
+      }
     }
   },
 
@@ -1884,9 +1901,61 @@ ${textContent}
         return this.fetch(...t);
       }
 
+      const config = this.Config.getPromptTemplatesConfig();
+
+      // If the request is for the message feedback API, track the message feedback
+      if (t?.[0].match(config.EndpointMessageFeedback)) {
+        // Only track the message feedback if the current page URL contains Gizmo code
+        const GizmoCode = window.location.href.match(config.GizmoCodePattern);
+
+        if (!GizmoCode?.[1]) {
+          // Use the original fetch function to make the request since we know it is not for the chat backend API
+          return this.fetch(...t);
+        }
+
+        try {
+          // Parse the request body from JSON
+          const body = JSON.parse(t[1].body);
+
+          // Do not track duplicate votes with additional text feedback
+          if (body[config.FeedbackTextField]) {
+            return this.fetch(...t);
+          }
+
+          // Unknown feedback type
+          if (
+            !body[config.FeedbackRatingField] ||
+            ![config.FeedbackThumbsUp, config.FeedbackThumbsDown].includes(
+              body[config.FeedbackRatingField]
+            )
+          ) {
+            return this.fetch(...t);
+          }
+
+          // Track the message feedback
+          this.Client.voteForGizmo(
+            GizmoCode[1],
+            GizmoVoteTypeNo.RESULT_THUMBS,
+            body[config.FeedbackRatingField] &&
+              body[config.FeedbackRatingField] === config.FeedbackThumbsDown
+              ? -1
+              : 1
+          );
+        } catch (err) {
+          // If there was an error parsing the request body or tracking the message feedback,
+          // just use the original fetch function
+          console.error(
+            'replaceFetch: Error parsing request body or tracking message feedback',
+            err
+          );
+        }
+
+        // Use the original fetch function to make the request since we know it is not for the chat backend API
+        return this.fetch(...t);
+      }
+
       // Get the endpoint pattern for the chat backend API
-      const EndpointConversation =
-        this.Config.getPromptTemplatesConfig().EndpointConversation;
+      const EndpointConversation = config.EndpointConversation;
 
       // If the request is not for the chat backend API, just use the original fetch function
       if (!t[0] || !t[0].match(EndpointConversation)) {
@@ -2358,7 +2427,7 @@ ${textContent}
             .map((gpt) => {
               return /*html*/ `
                 <button class="AIPRM__flex AIPRM__flex-col AIPRM__gap-2 AIPRM__w-full AIPRM__bg-gray-50 dark:AIPRM__bg-white/5 AIPRM__p-4 AIPRM__rounded-md hover:AIPRM__bg-gray-200 dark:hover:AIPRM__bg-gray-900 AIPRM__text-left AIPRM__relative AIPRM__group" onclick="AIPRM.selectGizmo('${sanitizeInput(
-                  gpt.ShortURL
+                  gpt.GizmoCode
                 )}')">
                   <div class="flex AIPRM__gap-6 AIPRM__w-full AIPRM__justify-between">
                     <div class="AIPRM__w-4/5 AIPRM__min-w-0">
@@ -3937,7 +4006,8 @@ ${textContent}
         ) ||
         gizmo.AuthorDisplayName.toLowerCase().includes(
           this.GizmoSearch.toLowerCase()
-        )
+        ) ||
+        gizmo.ShortURL.toLowerCase().includes(this.GizmoSearch.toLowerCase())
       );
     });
   },
@@ -6199,7 +6269,11 @@ ${textContent}
   // Vote for a gizmo with a thumbs up
   async voteGizmoThumbsUp(GizmoCode) {
     try {
-      await this.Client.voteForGizmo(GizmoCode, 1);
+      await this.Client.voteForGizmo(
+        GizmoCode,
+        GizmoVoteTypeNo.TEASER_THUMBS,
+        1
+      );
     } catch (error) {
       this.showNotification(
         NotificationSeverity.ERROR,
@@ -6217,7 +6291,11 @@ ${textContent}
   // Vote for a gizmo with a thumbs down
   async voteGizmoThumbsDown(GizmoCode) {
     try {
-      await this.Client.voteForGizmo(GizmoCode, -1);
+      await this.Client.voteForGizmo(
+        GizmoCode,
+        GizmoVoteTypeNo.TEASER_THUMBS,
+        -1
+      );
     } catch (error) {
       this.showNotification(
         NotificationSeverity.ERROR,
@@ -8423,22 +8501,22 @@ ${textContent}
     );
   },
 
-  // selectGizmo selects a GPT from the list of GPTs using ShortURL and tracks the event
-  async selectGizmo(shortURL) {
-    // Abort if no shortURL was passed
-    if (!shortURL) {
+  // selectGizmo selects a GPT from the list of GPTs using GizmoCode and tracks the event
+  async selectGizmo(GizmoCode) {
+    // Abort if no GizmoCode was passed
+    if (!GizmoCode) {
       return;
     }
 
     // Track the event
     try {
-      await this.Client.useGizmo(shortURL, GizmoVoteTypeNo.VIEW);
+      await this.Client.useGizmo(GizmoCode, GizmoVoteTypeNo.VIEW);
     } catch (error) {
       console.error('Could not track gizmo view event', error);
     }
 
     // Navigate
-    window.location = `/g/${sanitizeInput(shortURL)}`;
+    window.location = `/g/${sanitizeInput(GizmoCode)}`;
   },
 };
 

@@ -167,9 +167,9 @@ export {
 
 /** @typedef {{PromptTemplates: LayoutChangeConfig[], General: LayoutChangeConfig[]}} LayoutChangesConfig */
 
-/** @typedef {{Enabled: boolean, Config: {EndpointConversation: string}}} PromptTemplatesConfig */
+/** @typedef {{Enabled: boolean, Config: {EndpointConversation: string, EndpointMessageFeedback: string, FeedbackTextField: string, FeedbackRatingField: string, FeedbackThumbsDown: string, FeedbackThumbsUp: string, GizmoCodePattern: string}}} PromptTemplatesConfig */
 
-/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig, PromptTemplates: PromptTemplatesConfig}, Selectors: SelectorConfig, LayoutChanges: LayoutChangesConfig}} RemoteConfig */
+/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig, PromptTemplates: PromptTemplatesConfig}, EndpointGizmos: string, Selectors: SelectorConfig, LayoutChanges: LayoutChangesConfig}} RemoteConfig */
 
 export class Config {
   /** @type {RemoteConfig} */
@@ -208,6 +208,11 @@ export class Config {
   /** @returns {WatermarkConfig['Config']} */
   getWatermarkConfig() {
     return this.#config.Features.Watermark.Config;
+  }
+
+  /** @returns {EndpointGizmos} */
+  getEndpointGizmos() {
+    return this.#config.EndpointGizmos;
   }
 
   /** @returns {SelectorConfig} */

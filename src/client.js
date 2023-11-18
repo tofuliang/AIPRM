@@ -89,7 +89,7 @@ import { Reaction } from './rxn.js';
  * @property {(myProfileInfo: string) => Promise<SubPrompt>} createMyProfileInfo
  * @property {(SortModeNo: SortModeNo) => Promise<Gizmo[]>} getGizmos
  * @property {(GizmoCode: string, GizmoVoteTypeNo: GizmoVoteTypeNo, GizmoConfig?: Object) => Promise<void>} useGizmo
- * @property {(GizmoCode: string, Vote: 1|-1) => Promise<void>} voteForGizmo
+ * @property {(GizmoCode: string, GizmoVoteTypeNo: GizmoVoteTypeNo, Vote: 1|-1) => Promise<void>} voteForGizmo
  * @property {(GizmoConfig: Object) => Promise<void>} submitNewGizmo
  * @property {(response: Response) => Promise<any>} handleResponse
  */
@@ -855,16 +855,17 @@ const AIPRMClient = {
    * Vote for a gizmo using AIPRM API endpoint
    *
    * @param {string} GizmoCode
+   * @param {GizmoVoteTypeNo} GizmoVoteTypeNo
    * @param {1|-1} Vote
    */
-  voteForGizmo(GizmoCode, Vote) {
+  voteForGizmo(GizmoCode, GizmoVoteTypeNo, Vote) {
     return fetch(`${this.APIEndpoint}/Gizmos/${GizmoCode}/Vote`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        VoteTypeNo: GizmoVoteTypeNo.TEASER_THUMBS,
+        VoteTypeNo: GizmoVoteTypeNo,
         Vote: Vote,
         User: this.User,
       }),
