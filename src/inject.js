@@ -107,6 +107,8 @@ import { VERSION } from './version.js';
  * @property {boolean} [IsVerified]
  * @property {PromptVariable[]} [PromptVariables]
  * @property {string[]} [ModelS]
+ * @property {string[]} [PluginS]
+ * @property {boolean} [IsGizmoStarterPrompt]
  */
 
 /** @typedef {{langcode: string, languageEnglish: string, languageLabel: string}} Language */
@@ -149,6 +151,13 @@ import { VERSION } from './version.js';
  * @property {number} CountUses
  * @property {number} CountViews
  * @property {number} CountVotes
+ */
+
+/**
+ * @typedef {Object} CurrentGizmo
+ * @property {string} GizmoCode
+ * @property {string} Title
+ * @property {Prompt[]} PromptStarterS
  */
 
 const DefaultPromptActivity = 'all';
@@ -324,6 +333,9 @@ window.AIPRM = {
   /** @type {Model[]} */
   ModelsActive: [],
 
+  /** @type {string[]} */
+  SpecialGizmos: [],
+
   /** @type {PromptBuilder} */
   PromptBuilder: null,
 
@@ -373,6 +385,9 @@ window.AIPRM = {
 
   // Prefill prompt via event
   PrefillPrompt: null,
+
+  /** @type {?CurrentGizmo} */
+  CurrentGizmo: null,
 
   // Check version using version server
   async checkVersion() {
@@ -550,6 +565,8 @@ window.AIPRM = {
 
     this.initSearchTermFromParam();
 
+    this.extractCurrentGizmoInformation();
+
     this.insertPromptTemplatesSection();
 
     this.insertGizmosSection();
@@ -597,6 +614,45 @@ window.AIPRM = {
     this.setupFavoritePromptsContextMenu();
 
     this.addLicenseWarning();
+  },
+
+  /**
+   * Extract current Gizmo basic information
+   */
+  extractCurrentGizmoInformation() {
+    const config = this.Config.getPromptTemplatesConfig();
+    const GizmoCode = window.location.href.match(config.GizmoCodePattern);
+
+    if (GizmoCode?.[1]) {
+      const selectorConfig = this.Config.getSelectorConfig();
+      const title = document.querySelector(selectorConfig.CurrentGizmoTitle);
+
+      this.CurrentGizmo = {
+        GizmoCode: GizmoCode[1],
+        Title: title?.textContent || '',
+      };
+
+      this.CurrentGizmo.PromptStarterS = this.createGizmoStarterPrompts();
+
+      if (this.SpecialGizmos.includes(this.CurrentGizmo.GizmoCode)) {
+        this.PromptModel = DefaultPromptModel;
+      } else {
+        this.PromptModel = this.CurrentGizmo.GizmoCode;
+      }
+
+      localStorage.setItem(lastPromptModelKey, this.PromptModel);
+    } else {
+      this.CurrentGizmo = null;
+
+      // if PromptModel is set to a specific Gizmo, then we need to reset it
+      if (
+        this.PromptModel !== DefaultPromptModel &&
+        !this.ModelsActive?.find((model) => model.ID === this.PromptModel)
+      ) {
+        this.PromptModel = DefaultPromptModel;
+        localStorage.setItem(lastPromptModelKey, this.PromptModel);
+      }
+    }
   },
 
   addLicenseWarning() {
@@ -769,7 +825,8 @@ window.AIPRM = {
     if (this.SelectedPromptTemplate?.ID) {
       this.Client.usePrompt(
         this.SelectedPromptTemplate.ID,
-        UsageTypeNo.LIVE_CRAWLING
+        UsageTypeNo.LIVE_CRAWLING,
+        this.CurrentGizmo?.GizmoCode
       );
     }
 
@@ -1624,15 +1681,20 @@ ${textContent}
           );
         })
         .then((models) => {
-          // sort the models by Label
-          this.Models = models.sort((a, b) =>
-            a.LabelAuthor.localeCompare(b.LabelAuthor)
-          );
+          // filter out special gizmos and sort the models by Label
+          this.Models = models
+            .filter((model) => model.StatusNo !== ModelStatusNo.SPECIAL_GIZMO)
+            .sort((a, b) => a.LabelAuthor.localeCompare(b.LabelAuthor));
 
           // filter out models that are not active
           this.ModelsActive = this.Models.filter(
             (model) => model.StatusNo === ModelStatusNo.ACTIVE
           );
+
+          // collect special gizmo codes
+          this.SpecialGizmos = models
+            .filter((model) => model.StatusNo === ModelStatusNo.SPECIAL_GIZMO)
+            .map((model) => model.ID);
         })
     );
   },
@@ -1833,14 +1895,19 @@ ${textContent}
   },
 
   /**
-   * Check if a template is for model
+   * Check if a template is for Model or Plugin
    *
    * @param {Prompt} template
-   * @param {string} modelID
+   * @param {string} modelOrPluginID
    * @returns {boolean}
    */
-  isTemplateForModel(template, modelID) {
-    if (template.ModelS?.find((model) => model === modelID)) {
+  isTemplateForModelOrPlugin(template, modelOrPluginID) {
+    if (template.ModelS?.find((model) => model === modelOrPluginID)) {
+      return true;
+    } else if (
+      this.CurrentGizmo &&
+      template.PluginS?.find((plugin) => plugin === modelOrPluginID)
+    ) {
       return true;
     } else {
       return false;
@@ -2067,7 +2134,11 @@ ${textContent}
       const template = this.SelectedPromptTemplate;
 
       if (template) {
-        this.Client.usePrompt(template.ID, UsageTypeNo.SEND);
+        this.Client.usePrompt(
+          template.ID,
+          UsageTypeNo.SEND,
+          this.CurrentGizmo?.GizmoCode
+        );
       }
 
       // Allow the user to use continue actions after sending a prompt
@@ -2132,7 +2203,11 @@ ${textContent}
           );
 
           // Track the tone usage
-          this.Client.usePrompt(`${tone.ID}`, UsageTypeNo.SEND);
+          this.Client.usePrompt(
+            `${tone.ID}`,
+            UsageTypeNo.SEND,
+            this.CurrentGizmo?.GizmoCode
+          );
         }
 
         // If the user has selected a writing style, add it to the request body
@@ -2148,7 +2223,11 @@ ${textContent}
           );
 
           // Track the writing style usage
-          this.Client.usePrompt(`${writingStyle.ID}`, UsageTypeNo.SEND);
+          this.Client.usePrompt(
+            `${writingStyle.ID}`,
+            UsageTypeNo.SEND,
+            this.CurrentGizmo?.GizmoCode
+          );
         }
 
         // If the user has selected a target language, add it to the request body
@@ -2250,6 +2329,11 @@ ${textContent}
     // Insert "Prompt Templates" section to the main page.
     // Insert language select and continue button above the prompt textarea input
     if (e.querySelector(selectorConfig.ElementAddedExportButtonDisable)) {
+      this.extractCurrentGizmoInformation();
+
+      // reset current page, so prompt templates are shown from start
+      this.PromptTemplateSection.currentPage = 0;
+
       await this.insertPromptTemplatesSection();
 
       const button = document.getElementById('export-button');
@@ -2886,7 +2970,7 @@ ${textContent}
   },
 
   // save prompt template via API and update client state
-  async savePromptAsTemplate(e) {
+  async savePromptAsTemplate(editedPrompt = undefined, e) {
     e.preventDefault();
 
     // if it's basic mode -> build prompt template first (input with name createPromptMode in savePromptForm)
@@ -2902,6 +2986,11 @@ ${textContent}
     const prompt = {
       ModelS: [],
     };
+
+    if (editedPrompt) {
+      prompt.PluginS = editedPrompt.PluginS;
+    }
+
     const formData = new FormData(e.target);
 
     for (const [key, value] of formData) {
@@ -2917,6 +3006,40 @@ ${textContent}
     if (this.promptRequiresLiveCrawling(prompt.Prompt)) {
       prompt.PromptFeatureBitset |= PromptFeatureBitset.LIVE_CRAWLING;
     }
+
+    const selectedGizmos = prompt.ModelS?.filter(
+      (modelID) => !this.Models.find((model) => model.ID === modelID)
+    );
+
+    // remove unselected Gizmos from Plugins, but leave private Gizmos
+    prompt.PluginS = prompt.PluginS?.filter((plugin) => {
+      const gizmo = this.Gizmos.find((gizmo) => gizmo.GizmoCode === plugin);
+      if (!gizmo) {
+        return true;
+      }
+
+      return selectedGizmos?.includes(gizmo.GizmoCode);
+    });
+
+    // add CurrentGizmo if selected
+    if (this.CurrentGizmo) {
+      const currentGizmoSelected = selectedGizmos?.includes(
+        this.CurrentGizmo.GizmoCode
+      );
+
+      if (currentGizmoSelected) {
+        if (prompt.PluginS == null) {
+          prompt.PluginS = [this.CurrentGizmo.GizmoCode];
+        } else if (!prompt.PluginS.includes(this.CurrentGizmo.GizmoCode)) {
+          prompt.PluginS.push(this.CurrentGizmo.GizmoCode);
+        }
+      }
+    }
+
+    // remove Gizmos from Models
+    prompt.ModelS = prompt.ModelS?.filter((modelID) =>
+      this.Models.find((model) => model.ID === modelID)
+    );
 
     // re-check user status
     await this.Client.checkUserStatus();
@@ -2939,7 +3062,8 @@ ${textContent}
           savedPrompt.ID,
           currentCreatePromptMode === CreatePromptMode.BASIC
             ? UsageTypeNo.CREATE_BASIC
-            : UsageTypeNo.CREATE_ADVANCED
+            : UsageTypeNo.CREATE_ADVANCED,
+          this.CurrentGizmo?.GizmoCode
         );
       }
 
@@ -3408,8 +3532,9 @@ ${textContent}
    * Show modal to save prompt as template
    *
    * @param {Event|null} e
+   * @param {Prompt|null} editedPrompt
    */
-  async showSavePromptModal(e) {
+  async showSavePromptModal(e, editedPrompt) {
     let promptTemplate = '';
 
     const isEditPromptEvent = e && e.type === editPromptTemplateEvent;
@@ -3460,7 +3585,7 @@ ${textContent}
 
       savePromptModal.addEventListener(
         'submit',
-        this.savePromptAsTemplate.bind(this)
+        this.savePromptAsTemplate.bind(this, editedPrompt)
       );
 
       document.body.appendChild(savePromptModal);
@@ -3649,6 +3774,25 @@ ${textContent}
                         <label>Made for</label>
                         <select multiple multiselect-max-items="1" multiselect-hide-x="true" name="ModelS"
                           class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                          
+                          ${
+                            this.CurrentGizmo
+                              ? /*html*/ `
+                              <option value="${sanitizeInput(
+                                this.CurrentGizmo.GizmoCode
+                              )}" AIPRMModelStatusNo="1" ${
+                                  isEditPromptEvent ? '' : 'selected'
+                                }>${sanitizeInput(
+                                  this.CurrentGizmo.Title
+                                )}</option>
+                              `
+                              : ''
+                          }
+
+                          ${this.addPluginsToMadeForDropdown(
+                            editedPrompt?.PluginS
+                          )}
+
                           ${this.Models.map(
                             (model) => /*html*/ `
                           <option value="${sanitizeInput(
@@ -3754,6 +3898,65 @@ ${textContent}
         this.hideSavePromptModal();
       }
     });
+  },
+
+  /**
+   * @param {string[] | undefined} plugins
+   */
+  addPluginsToMadeForDropdown(plugins = undefined) {
+    if (!plugins) {
+      return '';
+    }
+
+    return plugins
+      .map((plugin) => {
+        if (plugin === this.CurrentGizmo?.GizmoCode) {
+          //CurrentGizmo is handled separately
+          return '';
+        }
+
+        const gizmo = this.Gizmos.find((gizmo) => gizmo.GizmoCode === plugin);
+        if (!gizmo) {
+          return '';
+        }
+
+        return /*html*/ `
+        <option value="${sanitizeInput(
+          gizmo.GizmoCode
+        )}" AIPRMModelStatusNo="1" selected>
+          ${sanitizeInput(gizmo.Title)}
+        </option>`;
+      })
+      .join('');
+  },
+
+  /**
+   * @param {string[] | undefined} plugins
+   */
+  addPluginsToPromptCard(plugins = undefined) {
+    if (!plugins) {
+      return '';
+    }
+
+    return plugins
+      .map((plugin) => {
+        if (plugin === this.CurrentGizmo?.GizmoCode) {
+          //CurrentGizmo is handled separately
+          return '';
+        }
+
+        const gizmo = this.Gizmos.find((gizmo) => gizmo.GizmoCode === plugin);
+        if (!gizmo) {
+          return '';
+        }
+
+        return /*html*/ `
+        <span class="AIPRM__bg-green-100 AIPRM__text-green-800 AIPRM__text-xs AIPRM__font-medium AIPRM__mr-1 AIPRM__px-1.5 AIPRM__py-0.5 AIPRM__rounded dark:AIPRM__bg-green-900 dark:AIPRM__text-green-300" title="This prompt is optimized for Custom GPT: ${sanitizeInput(
+          gizmo.Title
+        )}">${sanitizeInput(gizmo.Title)}</span>
+      `;
+      })
+      .join('');
   },
 
   /**
@@ -3975,7 +4178,7 @@ ${textContent}
         (this.PromptActivity === DefaultPromptActivity ||
           template.Category === this.PromptActivity) &&
         (this.PromptModel === DefaultPromptModel ||
-          this.isTemplateForModel(template, this.PromptModel)) &&
+          this.isTemplateForModelOrPlugin(template, this.PromptModel)) &&
         (!this.PromptSearch ||
           template.Teaser.toLowerCase().includes(
             this.PromptSearch.toLowerCase()
@@ -4096,17 +4299,31 @@ ${textContent}
     // Get the current page number and page size from the promptTemplateSection object
     const { currentPage, pageSize } = this.PromptTemplateSection;
 
+    let templatesWithGizmoStarterPrompts = [];
+    if (this.PromptTemplatesType === PromptTemplatesType.PUBLIC && this.CurrentGizmo) {
+      // only show Gizmo starter prompts on Public tab
+      const gizmoStarterPrompts = this.CurrentGizmo?.PromptStarterS || [];
+      templatesWithGizmoStarterPrompts = [...gizmoStarterPrompts, ...templates];
+    } else {
+      templatesWithGizmoStarterPrompts = [...templates];
+    }
+
     // Calculate the start and end indices of the current page of prompt templates
     const start = pageSize * currentPage;
-    const end = Math.min(pageSize * (currentPage + 1), templates.length);
+    const end = Math.min(
+      pageSize * (currentPage + 1),
+      templatesWithGizmoStarterPrompts.length
+    );
 
     // Get the current page of prompt templates and add "IsFavorite" flag to each of the current templates
     const currentTemplates = await Promise.all(
-      templates.slice(start, end).map(async (template) => ({
-        ...template,
-        IsFavorite: await this.isFavorite(template.ID),
-        IsVerified: await this.isVerified(template.ID),
-      }))
+      templatesWithGizmoStarterPrompts
+        .slice(start, end)
+        .map(async (template) => ({
+          ...template,
+          IsFavorite: await this.isFavorite(template.ID),
+          IsVerified: await this.isVerified(template.ID),
+        }))
     );
 
     const favoritesList = this.Lists.getFavorites();
@@ -4150,7 +4367,7 @@ ${textContent}
         Showing <span class="${css`paginationNumber`}">${
       start + 1
     }</span> to <span class="${css`paginationNumber`}">${end}</span> of <span class="${css`paginationNumber`}">${
-      templates.length
+      templatesWithGizmoStarterPrompts.length
     } Prompts</span>
       </span>
       <div class="${css`paginationButtonGroup`}">
@@ -4413,12 +4630,31 @@ ${textContent}
                 this.PromptModel === DefaultPromptModel ? 'selected' : ''
               }>Not specific</option>
 
+              ${
+                this.CurrentGizmo
+                  ? /*html*/ `
+                  <optgroup label="Current GPT">
+                    <option value="${sanitizeInput(
+                      this.CurrentGizmo.GizmoCode
+                    )}" ${
+                      this.PromptModel === this.CurrentGizmo.GizmoCode
+                        ? 'selected'
+                        : ''
+                    }>${sanitizeInput(this.CurrentGizmo.Title)}</option>
+                  </optgroup>
+                  <optgroup label="ChatGPT Models">
+                  `
+                  : ''
+              }
+
               ${this.ModelsActive.map(
                 (model) =>
                   /*html*/ `<option value="${sanitizeInput(model.ID)}" ${
                     this.PromptModel === model.ID ? 'selected' : ''
                   }>${sanitizeInput(model.LabelUser)}</option>`
               ).join('')}
+
+              ${this.CurrentGizmo ? /*html*/ `</optgroup>` : ''}
             </select>
           </div>
 
@@ -4444,23 +4680,32 @@ ${textContent}
         </div>
 
         ${
-          templates.length > this.PromptTemplateSection.pageSize
+          templatesWithGizmoStarterPrompts.length >
+          this.PromptTemplateSection.pageSize
             ? paginationContainer
             : ''
         }
-
-        ${this.handleNoPromptsInViewMessage(
-          currentTemplates,
-          isFavoritesListView,
-          selectedList
-        )}
 
         <ul class="${css`ul`} AIPRM__grid AIPRM__grid-cols-1 lg:AIPRM__grid-cols-2 ${
       !isSidebarView ? '2xl:AIPRM__grid-cols-4' : ''
     }">
           ${currentTemplates
-            .map(
-              (template) => /*html*/ `
+            .map((template) =>
+              template.IsGizmoStarterPrompt
+                ? /*html*/ `<button onclick="AIPRM.useGizmoStarterPrompt('${
+                    template.ID
+                  }')" class="${css`card`} AIPRM__relative AIPRM__group">
+
+                  <h3 class="${css`h3`}" style="overflow-wrap: anywhere;">
+                    ${sanitizeInput(template.Prompt)}
+                  </h3>
+
+                  <div class="AIPRM__-mt-0.5 AIPRM__text-gray-500 AIPRM__text-xs AIPRM__pb-1 AIPRM__max-w-full AIPRM__w-full">
+                    (${sanitizeInput(template.Title)})
+                  </div>
+                </button>
+                `
+                : /*html*/ `
             <button onclick="AIPRM.selectPromptTemplateByIndex(${
               template.ID
             })" class="${css`card`} AIPRM__relative AIPRM__group">
@@ -4506,8 +4751,8 @@ ${textContent}
 
               <div class="AIPRM__flex AIPRM__items-start AIPRM__w-full AIPRM__justify-between">
                 <h3 class="${css`h3`}" style="overflow-wrap: anywhere; ${
-                template.IsVerified ? 'padding-right: 30px;' : ''
-              }">
+                    template.IsVerified ? 'padding-right: 30px;' : ''
+                  }">
                   ${sanitizeInput(template.Title)}
                   ${
                     template.IsVerified
@@ -4627,8 +4872,8 @@ ${textContent}
                 <span title="Last updated on ${formatDateTime(
                   template.RevisionTime
                 )}" class="AIPRM__mx-1">${formatAgo(
-                template.RevisionTime
-              )}</span>
+                    template.RevisionTime
+                  )}</span>
 
                 ${
                   template.ForkedFromPromptID
@@ -4653,6 +4898,20 @@ ${textContent}
                     `
                     : ''
                 }
+
+                ${
+                  this.CurrentGizmo &&
+                  template.PluginS?.includes(this.CurrentGizmo.GizmoCode)
+                    ? /*html*/ `
+                    <span class="AIPRM__bg-green-100 AIPRM__text-green-800 AIPRM__text-xs AIPRM__font-medium AIPRM__mr-1 AIPRM__px-1.5 AIPRM__py-0.5 AIPRM__rounded dark:AIPRM__bg-green-900 dark:AIPRM__text-green-300" title="This prompt is optimized for ${sanitizeInput(
+                      this.CurrentGizmo.Title
+                    )}">${sanitizeInput(this.CurrentGizmo.Title)}</span>
+                  `
+                    : ''
+                }
+
+
+                ${this.addPluginsToPromptCard(template.PluginS)}
 
                 ${(template.ModelS || [])
                   .map((modelID) => {
@@ -4782,9 +5041,16 @@ ${textContent}
               : ''
           }
         </ul>
+
+        ${this.handleNoPromptsInViewMessage(
+          templates,
+          isFavoritesListView,
+          selectedList
+        )}
     
         ${
-          templates.length > this.PromptTemplateSection.pageSize
+          templatesWithGizmoStarterPrompts.length >
+          this.PromptTemplateSection.pageSize
             ? paginationContainer
             : ''
         }
@@ -4872,8 +5138,8 @@ ${textContent}
     ) {
       return /*html*/ `
         <div class="AIPRM__w-full AIPRM__my-8">
-          <div class="AIPRM__font-semibold AIPRM__text-xl">No prompts found for your current filter.</div>
-          <div>Please reset your filters to view all prompts.</div>
+          <div class="AIPRM__font-semibold AIPRM__text-xl">No AIPRM prompts found for your current filter.</div>
+          <div>Please reset your filters to view all AIPRM prompts.</div>
           <a class="AIPRM__underline" href="#" title="Reset filters" onclick="event.stopPropagation(); AIPRM.resetFilters();">Click here to reset filters</a>
         </div>
       `;
@@ -4927,6 +5193,61 @@ ${textContent}
         </div>`;
       }
     }
+  },
+
+  createGizmoStarterPrompts() {
+    if (!this.CurrentGizmo) {
+      return [];
+    }
+
+    const gizmo = this.Gizmos?.find(
+      (g) => g.GizmoCode === this.CurrentGizmo.GizmoCode
+    );
+    if (!gizmo) {
+      // we do not have Gizmo yet in list
+      return [];
+    }
+
+    let idIndex = 0;
+    return gizmo.PromptStarterS.map((p) => {
+      return {
+        ID: 'g-' + idIndex++,   // we need to have unique ID for each PromptStarter - also different from normal AIPRM prompts
+        Title: gizmo.Title + ' starter prompt',
+        Prompt: p,
+        IsGizmoStarterPrompt: true,
+      };
+    });
+  },
+
+  useGizmoStarterPrompt(starterPromptID) {
+    if (!this.CurrentGizmo) {
+      console.error('useGizmoStarterPrompt: No current gizmo');
+      return;
+    }
+
+    const starterPrompt = this.CurrentGizmo.PromptStarterS.find((p) => p.ID === starterPromptID);
+    if (!starterPrompt) {
+      console.error('useGizmoStarterPrompt: No starter prompt with ID');
+      return;
+    }
+
+    // Get the prompt textarea input
+    const textarea = document.querySelector(
+      this.Config.getSelectorConfig().PromptTextarea
+    );
+
+    // If there is no textarea, skip
+    if (!textarea) {
+      console.error('useGizmoStarterPrompt: No textarea found');
+      return;
+    }
+
+    // Add the continue action prompt to the textarea
+    textarea.value = starterPrompt.Prompt;
+    textarea.focus();
+
+    // Dispatch the input event to trigger the event listeners and enable the "Submit" button
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
   },
 
   /** @param {List} list */
@@ -5822,7 +6143,11 @@ ${textContent}
     }
 
     // Track usage of continue action
-    this.Client.usePrompt(`${continueAction.ID}`, UsageTypeNo.SEND);
+    this.Client.usePrompt(
+      `${continueAction.ID}`,
+      UsageTypeNo.SEND,
+      this.CurrentGizmo?.GizmoCode
+    );
 
     // Submit the continue action prompt
     this.submitContinueActionPrompt(continueAction.Prompt);
@@ -5922,13 +6247,25 @@ ${textContent}
     // Filter templates based on selected activity and search query
     templates = await this.filterPromptTemplates(templates);
 
+    let templatesWithGizmoStarterPrompts = [];
+    if (this.PromptTemplatesType === PromptTemplatesType.PUBLIC && this.CurrentGizmo) {
+      // only show Gizmo starter prompts on Public tab
+      const gizmoStarterPrompts = this.CurrentGizmo?.PromptStarterS || [];
+      templatesWithGizmoStarterPrompts = [...gizmoStarterPrompts, ...templates];
+    } else {
+      templatesWithGizmoStarterPrompts = [...templates];
+    }
+
     // If there are no templates, skip
-    if (templates.length === 0) return;
+    if (templatesWithGizmoStarterPrompts.length === 0) return;
 
     this.PromptTemplateSection.currentPage++;
 
     this.PromptTemplateSection.currentPage = Math.min(
-      Math.floor((templates.length - 1) / this.PromptTemplateSection.pageSize),
+      Math.floor(
+        (templatesWithGizmoStarterPrompts.length - 1) /
+          this.PromptTemplateSection.pageSize
+      ),
       this.PromptTemplateSection.currentPage
     );
 
@@ -5971,7 +6308,11 @@ ${textContent}
   // Export the current chat log to a file
   exportCurrentChat() {
     // unknown prompt ID - use hardcoded prompt ID = UsageTypeNo.EXPORT
-    this.Client.usePrompt(`${UsageTypeNo.EXPORT}`, UsageTypeNo.EXPORT);
+    this.Client.usePrompt(
+      `${UsageTypeNo.EXPORT}`,
+      UsageTypeNo.EXPORT,
+      this.CurrentGizmo?.GizmoCode
+    );
 
     const selectorConfig = this.Config.getSelectorConfig();
 
@@ -6106,7 +6447,10 @@ ${textContent}
       return;
     }
 
-    await this.showSavePromptModal(new CustomEvent(editPromptTemplateEvent));
+    await this.showSavePromptModal(
+      new CustomEvent(editPromptTemplateEvent),
+      prompt
+    );
 
     // Pre-fill the prompt template modal with the prompt template
     const form = document.getElementById('savePromptForm');
@@ -6154,9 +6498,17 @@ ${textContent}
   },
 
   prepareModelsMultiselect(prompt, form) {
+    const currentGizmo = this.CurrentGizmo;
     const optionsModelS = Array.from(form.elements['ModelS'].options);
+
     optionsModelS?.forEach(function (o) {
-      if (prompt.ModelS?.find((c) => c == o.value)) {
+      if (
+        currentGizmo &&
+        o.value === currentGizmo.GizmoCode &&
+        prompt.PluginS?.find((c) => c == o.value)
+      ) {
+        o.selected = true;
+      } else if (prompt.ModelS?.find((c) => c == o.value)) {
         o.selected = true;
       } else if (
         o.attributes['AIPRMModelStatusNo']?.value != ModelStatusNo.ACTIVE
@@ -6227,7 +6579,8 @@ ${textContent}
         (
           await this.getCurrentPromptTemplates()
         )[idx].ID,
-        1
+        1,
+        this.CurrentGizmo?.GizmoCode
       );
     } catch (error) {
       this.showNotification(
@@ -6250,7 +6603,8 @@ ${textContent}
         (
           await this.getCurrentPromptTemplates()
         )[idx].ID,
-        -1
+        -1,
+        this.CurrentGizmo?.GizmoCode
       );
     } catch (error) {
       this.showNotification(
@@ -6780,7 +7134,11 @@ ${textContent}
       this.SelectedPromptTemplate = template;
       textarea.focus();
 
-      this.Client.usePrompt(template.ID, UsageTypeNo.CLICK);
+      this.Client.usePrompt(
+        template.ID,
+        UsageTypeNo.CLICK,
+        this.CurrentGizmo?.GizmoCode
+      );
 
       // Update query param AIPRM_PromptID to the selected prompt ID
       if (url.searchParams.get(queryParamPromptID) === template.ID) {
@@ -7102,7 +7460,11 @@ ${textContent}
       }
     }
 
-    this.Client.usePrompt(prompt.ID, UsageTypeNo.VIEW_SOURCE);
+    this.Client.usePrompt(
+      prompt.ID,
+      UsageTypeNo.VIEW_SOURCE,
+      this.CurrentGizmo?.GizmoCode
+    );
 
     await this.showViewPromptModal(idx);
 
@@ -7123,9 +7485,16 @@ ${textContent}
   async forkToPrivatePrompt(idx) {
     const promptOriginal = (await this.getCurrentPromptTemplates())[idx];
 
-    this.Client.usePrompt(promptOriginal.ID, UsageTypeNo.FORK);
+    this.Client.usePrompt(
+      promptOriginal.ID,
+      UsageTypeNo.FORK,
+      this.CurrentGizmo?.GizmoCode
+    );
 
-    await this.showSavePromptModal(new CustomEvent(forkPromptTemplateEvent));
+    await this.showSavePromptModal(
+      new CustomEvent(forkPromptTemplateEvent),
+      prompt
+    );
 
     // Pre-fill the prompt template modal with the prompt template
     const form = document.getElementById('savePromptForm');
@@ -7165,7 +7534,10 @@ ${textContent}
   async clonePrompt(idx) {
     const promptOriginal = (await this.getCurrentPromptTemplates())[idx];
 
-    await this.showSavePromptModal(new CustomEvent(clonePromptTemplateEvent));
+    await this.showSavePromptModal(
+      new CustomEvent(clonePromptTemplateEvent),
+      prompt
+    );
 
     // Pre-fill the prompt template modal with the cloned prompt template
     const form = document.getElementById('savePromptForm');
@@ -7391,6 +7763,11 @@ ${textContent}
     }
 
     const prompt = (await this.getCurrentPromptTemplates())[idx];
+
+    if (!prompt) {
+      // Gizmo starter prompt
+      return false;
+    }
 
     return await list.has(prompt);
   },
@@ -8119,6 +8496,11 @@ ${textContent}
     }
 
     const prompt = (await this.getCurrentPromptTemplates())[idx];
+
+    if (!prompt) {
+      // Gizmo starter prompt
+      return false;
+    }
 
     return await list.has(prompt);
   },

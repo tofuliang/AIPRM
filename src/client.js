@@ -297,18 +297,25 @@ const AIPRMClient = {
    *
    * @param {string} PromptID
    * @param {(1|-1)} Vote
+   * @param {string|undefined} GizmoCode
    */
-  voteForPrompt(PromptID, Vote) {
+  voteForPrompt(PromptID, Vote, GizmoCode = undefined) {
+    const body = {
+      VoteTypeNo: VoteTypeNo.PROMPT_TEASER_THUMBS,
+      Vote: Vote,
+      User: this.User,
+    };
+
+    if (GizmoCode) {
+      body.PluginS = [GizmoCode];
+    }
+
     return fetch(`${this.APIEndpoint}/Vote/${PromptID}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        VoteTypeNo: VoteTypeNo.PROMPT_TEASER_THUMBS,
-        Vote: Vote,
-        User: this.User,
-      }),
+      body: JSON.stringify(body),
     }).then(this.handleResponse);
   },
 
@@ -340,17 +347,24 @@ const AIPRMClient = {
    *
    * @param {string} PromptID
    * @param {UsageTypeNo} UsageTypeNo
+   * @param {string|undefined} GizmoCode
    */
-  usePrompt(PromptID, UsageTypeNo = UsageTypeNo.CLICK) {
+  usePrompt(PromptID, UsageTypeNo = UsageTypeNo.CLICK, GizmoCode = undefined) {
+    const body = {
+      UsageTypeNo: UsageTypeNo,
+      User: this.User,
+    };
+
+    if (GizmoCode) {
+      body.PluginS = [GizmoCode];
+    }
+
     return fetch(`${this.APIEndpoint}/Prompts/${PromptID}/Use`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        UsageTypeNo: UsageTypeNo,
-        User: this.User,
-      }),
+      body: JSON.stringify(body),
     }).then(this.handleResponse);
   },
 

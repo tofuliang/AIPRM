@@ -69,7 +69,7 @@ const WritingStyleFeedURL =
   'https://api.aiprm.com/csv/writing_styles-v2-20230216.csv?v=';
 const ContinueActionsFeedURL =
   'https://api.aiprm.com/csv/continue_actions-20230216.csv?v=';
-const ModelFeedURL = 'https://api.aiprm.com/csv/models-20230612.csv?v=';
+const ModelFeedURL = 'https://api.aiprm.com/csv/models-20231111.csv?v=';
 const PromptBuilderFeedURL =
   'https://api.aiprm.com/csv/prompt_builder-20230811.csv?v=';
 const AppShort = 'AIPRM';
@@ -161,6 +161,7 @@ export {
  * @property {string} SavePromptAsTemplatePromptText
  * @property {string} GizmosTitle
  * @property {number} GizmosTitleIndex
+ * @property {string} CurrentGizmoTitle
  */
 
 /** @typedef {{Selector: string, Add: string[], Remove: string[]}} LayoutChangeConfig */

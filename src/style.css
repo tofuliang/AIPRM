@@ -1576,7 +1576,6 @@ body {
 .AIPRM__multiselect-dropdown span.AIPRM__placeholder {
   border-radius: 4px;
   display: inline-block;
-  white-space: nowrap;
   cursor: default;
 }
 

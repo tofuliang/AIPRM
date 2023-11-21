@@ -225,6 +225,7 @@ const ModelStatusNo = {
   UNKNOWN: 0,
   ACTIVE: 1,
   DEPRECATED: 2,
+  SPECIAL_GIZMO: 4,
 };
 
 /** @enum {string} */
