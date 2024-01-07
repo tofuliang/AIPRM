@@ -6,7 +6,7 @@ const getEnvironmentConfig = () => {
   switch (currentEnvironment) {
     case 'production':
       return {
-        APIEndpoint: 'https://api.aiprm.com/api6',
+        APIEndpoint: 'https://api.aiprm.com/api7',
         APIEndpointAPP: 'https://app1.aiprm.com/api',
         AppAccountURL: 'https://app1.aiprm.com/account',
         AppPricingURL: 'https://app1.aiprm.com/pricing',
@@ -15,7 +15,7 @@ const getEnvironmentConfig = () => {
       };
     case 'test':
       return {
-        APIEndpoint: 'https://test-api.aiprm.com/api4',
+        APIEndpoint: 'https://test-api.aiprm.com/api7',
         APIEndpointAPP: 'https://test-app.aiprm.com/api',
         AppAccountURL: 'https://test-app.aiprm.com/account',
         AppPricingURL: 'https://test-app.aiprm.com/pricing',
@@ -56,6 +56,7 @@ const AppTeamURL = environmentConfig.AppTeamURL;
 
 // Define global constants
 const PromptPlaceholder = '[PROMPT]';
+const PromptPlaceholder1 = '[PROMPT1]';
 const TargetLanguagePlaceholder = '[TARGETLANGUAGE]';
 const CrawledTextPlaceholder = '[CRAWLEDTEXT]';
 const CrawledSourcePlaceholder = '[CRAWLEDSOURCE]';
@@ -93,6 +94,7 @@ const ValidateVariableDefinition = /\[VARIABLE([0-9]+):(.+?)(:.*?)?(:.*?)?\]/g;
 
 export {
   PromptPlaceholder,
+  PromptPlaceholder1,
   TargetLanguagePlaceholder,
   CrawledTextPlaceholder,
   CrawledSourcePlaceholder,
@@ -162,6 +164,7 @@ export {
  * @property {string} GizmosTitle
  * @property {number} GizmosTitleIndex
  * @property {string} CurrentGizmoTitle
+ * @property {string} CurrentGizmoPromptStarters
  */
 
 /** @typedef {{Selector: string, Add: string[], Remove: string[]}} LayoutChangeConfig */
@@ -170,7 +173,9 @@ export {
 
 /** @typedef {{Enabled: boolean, Config: {EndpointConversation: string, EndpointMessageFeedback: string, FeedbackTextField: string, FeedbackRatingField: string, FeedbackThumbsDown: string, FeedbackThumbsUp: string, GizmoCodePattern: string}}} PromptTemplatesConfig */
 
-/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig, PromptTemplates: PromptTemplatesConfig}, EndpointGizmos: string, Selectors: SelectorConfig, LayoutChanges: LayoutChangesConfig}} RemoteConfig */
+/** @typedef {{Title: string, NoOffer: string, MaxRedemptions: string, NewFeatureBadge: string}} ReferralsConfig */
+
+/** @typedef {{Features: {LiveCrawling: LiveCrawlingConfig, Watermark: WatermarkConfig, PromptTemplates: PromptTemplatesConfig, Referrals: ReferralsConfig}, EndpointGizmos: string, Selectors: SelectorConfig, LayoutChanges: LayoutChangesConfig}} RemoteConfig */
 
 export class Config {
   /** @type {RemoteConfig} */
@@ -209,6 +214,11 @@ export class Config {
   /** @returns {WatermarkConfig['Config']} */
   getWatermarkConfig() {
     return this.#config.Features.Watermark.Config;
+  }
+
+  /** @returns {ReferralsConfig} */
+  getReferralsConfig() {
+    return this.#config.Features.Referrals;
   }
 
   /** @returns {EndpointGizmos} */

@@ -16,6 +16,12 @@ const ReactionNo = {
   RXN_AIPRM_INVALID_PROMPT_HINT_UPPERCASE: 70106,
 
   RXN_AIPRM_LIST_NOT_FOUND: 70301,
+
+  RXN_AIPRM_REFERRALS_NO_OFFER: 74001,
+  RXN_AIPRM_REFERRALS_MAX_REDEMPTIONS: 74002,
+
+  RXN_AIPRM_DOCUMENT_INDEX_NOT_FOUND: 80001,
+  RXN_AIPRM_DOCUMENT_INDEX_INCORRECT_PLAN: 80005,
 };
 
 /** @enum {string} */
@@ -45,6 +51,12 @@ const ReactionMessage = {
     'The prompt hint has too many uppercase letters.',
 
   [ReactionNo.RXN_AIPRM_LIST_NOT_FOUND]: 'The list was not found.',
+
+  [ReactionNo.RXN_AIPRM_DOCUMENT_INDEX_NOT_FOUND]:
+    'Document Index does not exist.',
+
+  [ReactionNo.RXN_AIPRM_DOCUMENT_INDEX_INCORRECT_PLAN]:
+    'Incorrect subscription plan for Custom Index feature.',
 };
 
 class Reaction extends Error {

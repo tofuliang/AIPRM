@@ -23,7 +23,7 @@ const PromptTypeNo = {
 };
 
 /** @enum {number} */
-const ExternalSystemNo = {
+const SystemNo = {
   UNKNOWN: 0,
   OPENAI: 1,
 };
@@ -212,6 +212,8 @@ const MemberRoleNo = {
 const FeatureBitset = {
   UNKNOWN: 0,
   TEAMS: 1,
+  REFERRALS: 4,
+  CUSTOM_INDEXES: 8
 };
 
 /** @enum {number} */
@@ -251,7 +253,7 @@ export {
   PromptTemplatesType,
   NotificationSeverity,
   PromptTypeNo,
-  ExternalSystemNo,
+  SystemNo,
   FeedbackTypeNo,
   UsageTypeNo,
   VoteTypeNo,

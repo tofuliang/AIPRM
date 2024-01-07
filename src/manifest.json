@@ -2,8 +2,8 @@
   "update_url": "https://raw.githubusercontent.com/tofuliang/AIPRM/master/update.xml",
   "manifest_version": 3,
   "name": "AIPRM for ChatGPT",
-  "description": "AIPRM adds a list of curated prompt templates for SEO, SaaS and more to ChatGPT. Try today.",
-  "version": "91.1.11.14",
+  "description": "AIPRM is your cheat code for ChatGPT. Adds a list of curated prompt templates and advanced features. Try today.",
+  "version": "91.2.1.2",
   "icons": {
     "16": "icons/16.png",
     "32": "icons/32.png",
@@ -55,7 +55,8 @@
         "readability.js",
         "multiselect-dropdown.js",
         "prompt-builder.js",
-        "version.js"
+        "version.js",
+        "referrals.js"
       ],
       "matches": [
         "https://chat.openai.com/*"

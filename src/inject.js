@@ -18,6 +18,7 @@ import {
   ExportHeaderPrefix,
   LanguageFeedURL,
   PromptPlaceholder,
+  PromptPlaceholder1,
   TargetLanguagePlaceholder,
   VariablePlaceholder,
   VariableDefinition,
@@ -45,7 +46,7 @@ import {
   UserLevelNo,
   ItemStatusNo,
   PromptFeatureBitset,
-  ExternalSystemNo,
+  SystemNo,
   ModelStatusNo,
   LayoutChangeType,
   CreatePromptMode,
@@ -73,6 +74,7 @@ import {
 
 import { MultiselectDropdown } from './multiselect-dropdown.js';
 import { PromptBuilder } from './prompt-builder.js';
+import { Referrals } from './referrals.js';
 import { VERSION } from './version.js';
 
 /**
@@ -389,6 +391,9 @@ window.AIPRM = {
   /** @type {?CurrentGizmo} */
   CurrentGizmo: null,
 
+  /** @type {Referrals} */
+  Referrals: null,
+
   // Check version using version server
   async checkVersion() {
     try {
@@ -514,8 +519,8 @@ window.AIPRM = {
     // initialize user based on page props
     if (window?.__NEXT_DATA__?.props?.pageProps?.user?.id) {
       this.Client.User = {
-        ExternalID: window.__NEXT_DATA__.props.pageProps.user.id,
-        ExternalSystemNo: ExternalSystemNo.OPENAI,
+        OperatorID: window.__NEXT_DATA__.props.pageProps.user.id,
+        SystemNo: SystemNo.OPENAI,
         UserFootprint: '',
         IsLinked: false,
       };
@@ -581,6 +586,12 @@ window.AIPRM = {
 
     await this.storeMyProfileInfoFromLocalStorage();
 
+    this.Referrals = new Referrals(
+      this.Client,
+      this.Config.getReferralsConfig(),
+      this.showNotification
+    );
+
     this.insertLanguageToneWritingStyleContinueActions();
     this.insertIncludeMyProfileInfo();
     this.insertVariablesInputWrapper();
@@ -633,6 +644,31 @@ window.AIPRM = {
       };
 
       this.CurrentGizmo.PromptStarterS = this.createGizmoStarterPrompts();
+
+      // try to extract prompt starter, if we do not have Gizmo in directory
+      if (
+        !this.CurrentGizmo.PromptStarterS ||
+        this.CurrentGizmo.PromptStarterS.length === 0
+      ) {
+        const promptStarterButtons = document.querySelectorAll(
+          this.Config.getSelectorConfig().CurrentGizmoPromptStarters
+        );
+
+        if (promptStarterButtons) {
+          for (let i = 0; i < promptStarterButtons.length; i++) {
+            const promptText = promptStarterButtons[i].textContent;
+
+            if (promptText && promptText.length > 0) {
+              this.CurrentGizmo.PromptStarterS.push({
+                ID: 'g-' + i, // we need to have unique ID for each PromptStarter - also different from normal AIPRM prompts
+                Title: this.CurrentGizmo.Title + ' starter prompt',
+                Prompt: promptText,
+                IsGizmoStarterPrompt: true,
+              });
+            }
+          }
+        }
+      }
 
       if (this.SpecialGizmos.includes(this.CurrentGizmo.GizmoCode)) {
         this.PromptModel = DefaultPromptModel;
@@ -2041,6 +2077,10 @@ ${textContent}
       // Prompt from the request body
       let prompt;
 
+      // Use custom index lookup for prompt or not
+      let useAuxIndexLookup;
+
+      // Check if message contains placeholders to augment prompt
       try {
         // Get the options object for the request, which includes the request body
         options = t[1];
@@ -2077,6 +2117,19 @@ ${textContent}
 
         // Get the prompt from the request body
         prompt = body.messages[0].content.parts[messagePartIndex];
+
+        // Check if prompt contains reference for custom index lookup
+        // $[<NAMESPACE>::]<IndexCode>[(Max Count of Chunks Returned)]:<Query>
+        // namespace, namespace delimiter and max count of chunks returned are optional
+
+        // TODO: move to remote config for hotfixes
+        useAuxIndexLookup = this.Client.UserQuota.hasCustomIndexesFeatureEnabled() && prompt.match(
+          ///^\$(\w+::)?(\w+)(\(\d+\))?:([\w !$%&-§%\/\t\"\'\`\´.!?¿¡。‼⁇‽։;؟]+)$/gm
+          /^\$(\w+::)?(\w+)(\(\d+\))?:([^\n]+)$/gm
+        );
+
+        // TODO: remove debug
+        console.log('replaceFetch: useAuxIndexLookup', !!useAuxIndexLookup);
       } catch (error) {
         console.error('replaceFetch: Error parsing request body', error);
         return this.fetch(...t);
@@ -2088,7 +2141,8 @@ ${textContent}
         !this.SelectedPromptTemplate &&
         !this.Tone &&
         !this.WritingStyle &&
-        !this.TargetLanguage
+        !this.TargetLanguage &&
+        !useAuxIndexLookup
       ) {
         // Use profile message if needed - otherwise, use the original fetch function
         if (!this.IncludeMyProfileMessage || !this.SelectedMyProfileInfoID) {
@@ -2144,6 +2198,10 @@ ${textContent}
       // Allow the user to use continue actions after sending a prompt
       this.showContinueActionsButton();
 
+      // Collect variable values and names for custom index lookup
+      let variableValues = [];
+      let variableNames = [];
+
       try {
         if (template) {
           // Use the default target language if no target language has been selected
@@ -2153,10 +2211,17 @@ ${textContent}
 
           // Replace the prompt in the request body with the selected prompt template,
           // inserting the original prompt into the template and replacing the target language placeholder
-          let promptTextUpdated = template.Prompt.replaceAll(
+          let promptTextUpdated1 = template.Prompt.replaceAll(
             PromptPlaceholder,
             prompt
           ).replaceAll(TargetLanguagePlaceholder, targetLanguage);
+
+          // create a 1 liner from prompt by replacing all the \n with spaces
+          let prompt1 = prompt.replaceAll('\n', ' ');
+
+          let promptTextUpdated = promptTextUpdated1
+            .replaceAll(PromptPlaceholder1, prompt1)
+            .replaceAll(TargetLanguagePlaceholder, targetLanguage);
 
           // Replace variables with values
           if (template.PromptVariables) {
@@ -2169,6 +2234,9 @@ ${textContent}
                   VariablePlaceholder.replace('{idx}', promptVariable.ID),
                   v.value
                 );
+
+                variableValues.push(v.value);
+                variableNames.push(`VARIABLE${promptVariable.ID}`);
               }
             });
           }
@@ -2267,6 +2335,96 @@ ${textContent}
 
         // Clear the selected prompt template
         await this.selectPromptTemplateByIndex(null);
+
+        console.log('prompt: ', prompt);
+
+        console.log(
+          'promptPrepared: ',
+          body.messages[0].content.parts[messagePartIndex]
+        );
+
+        // TODO: Custom index lookup could be also specified as a prompt template variable value?
+        // TODO: YES
+        // 2nd check for custom index lookup
+        useAuxIndexLookup = this.Client.UserQuota.hasCustomIndexesFeatureEnabled() && body.messages[0].content.parts[
+          messagePartIndex
+        ].match(/^\$(\w+::)?(\w+)(\(\d+\))?:([^\n]+)$/gm);
+
+        // Augment prompt with custom index lookup
+        if (useAuxIndexLookup) {
+          // Show notification that custom index lookup is started
+          this.showNotification(
+            NotificationSeverity.INFO,
+            `Custom index lookup started ...`,
+            false
+          );
+
+          let augmentedPrompt;
+          let augmentPromptRequestError;
+
+          try {
+            // Send request to custom index lookup endpoint to augment prompt
+            augmentedPrompt = await this.Client.augmentPrompt(
+              prompt,
+              body.messages[0].content.parts[messagePartIndex],
+              body.model,
+              variableNames,
+              variableValues,
+              template ? template.ID : null
+            );
+          } catch (error) {
+            if (
+              error instanceof Reaction &&
+              error.ReactionNo ===
+                ReactionNo.RXN_AIPRM_DOCUMENT_INDEX_INCORRECT_PLAN
+            ) {
+              this.Client.UserQuota.incorrectPlanForDocumentIndexFeature();
+
+              this.showNotification(
+                NotificationSeverity.INFO,
+                `Custom index lookup failed - feature not supported in current plan - submitting prompt ...`
+              );
+
+              augmentPromptRequestError = error;
+            } else {
+              console.error('Error augmenting prompt', error);
+
+              this.showNotification(
+                NotificationSeverity.ERROR,
+                'Custom index lookup failed - ' +
+                  (error instanceof Reaction
+                    ? error.message
+                    : 'Something went wrong.') +
+                  ' Submitting prompt ...'
+              );
+
+              augmentPromptRequestError = error;
+            }
+          }
+
+          // No prompt returned from custom index lookup
+          if (!augmentedPrompt?.Prompt) {
+            console.error('Error augmenting prompt - no prompt returned');
+
+            // Show error notification only if request didn't fail
+            // (otherwise there is no prompt, because request failed and error notification was already shown)
+            if (!augmentPromptRequestError) {
+              this.showNotification(
+                NotificationSeverity.ERROR,
+                'Custom index lookup failed - no prompt returned - submitting prompt ...'
+              );
+            }
+          } else {
+            // Replace the prompt in the request body with the augmented prompt
+            body.messages[0].content.parts[messagePartIndex] =
+              augmentedPrompt.Prompt;
+
+            this.showNotification(
+              NotificationSeverity.SUCCESS,
+              'Custom index lookup finished - submitting prompt ...'
+            );
+          }
+        }
 
         // Stringify the modified request body and update the options object
         options.body = JSON.stringify(body);
@@ -2970,7 +3128,7 @@ ${textContent}
   },
 
   // save prompt template via API and update client state
-  async savePromptAsTemplate(editedPrompt = undefined, e) {
+  async savePromptAsTemplate(promptPlugins = undefined, e) {
     e.preventDefault();
 
     // if it's basic mode -> build prompt template first (input with name createPromptMode in savePromptForm)
@@ -2987,8 +3145,8 @@ ${textContent}
       ModelS: [],
     };
 
-    if (editedPrompt) {
-      prompt.PluginS = editedPrompt.PluginS;
+    if (promptPlugins) {
+      prompt.PluginS = promptPlugins;
     }
 
     const formData = new FormData(e.target);
@@ -3532,9 +3690,9 @@ ${textContent}
    * Show modal to save prompt as template
    *
    * @param {Event|null} e
-   * @param {Prompt|null} editedPrompt
+   * @param {string[]|null} promptPlugins
    */
-  async showSavePromptModal(e, editedPrompt) {
+  async showSavePromptModal(e, promptPlugins) {
     let promptTemplate = '';
 
     const isEditPromptEvent = e && e.type === editPromptTemplateEvent;
@@ -3585,7 +3743,7 @@ ${textContent}
 
       savePromptModal.addEventListener(
         'submit',
-        this.savePromptAsTemplate.bind(this, editedPrompt)
+        this.savePromptAsTemplate.bind(this, promptPlugins)
       );
 
       document.body.appendChild(savePromptModal);
@@ -3789,9 +3947,7 @@ ${textContent}
                               : ''
                           }
 
-                          ${this.addPluginsToMadeForDropdown(
-                            editedPrompt?.PluginS
-                          )}
+                          ${this.addPluginsToMadeForDropdown(promptPlugins)}
 
                           ${this.Models.map(
                             (model) => /*html*/ `
@@ -4063,6 +4219,9 @@ ${textContent}
     // Insert the "Export Button" before the "Color Mode" button
     nav.insertBefore(button, colorModeButton);
 
+    // Create and insert the "Referral Button" element
+    this.Referrals.addSidebarButton(button);
+
     // Create the "Version" element
     const version = document.createElement('a');
     version.id = 'AppName';
@@ -4300,7 +4459,10 @@ ${textContent}
     const { currentPage, pageSize } = this.PromptTemplateSection;
 
     let templatesWithGizmoStarterPrompts = [];
-    if (this.PromptTemplatesType === PromptTemplatesType.PUBLIC && this.CurrentGizmo) {
+    if (
+      this.PromptTemplatesType === PromptTemplatesType.PUBLIC &&
+      this.CurrentGizmo
+    ) {
       // only show Gizmo starter prompts on Public tab
       const gizmoStarterPrompts = this.CurrentGizmo?.PromptStarterS || [];
       templatesWithGizmoStarterPrompts = [...gizmoStarterPrompts, ...templates];
@@ -5211,7 +5373,7 @@ ${textContent}
     let idIndex = 0;
     return gizmo.PromptStarterS.map((p) => {
       return {
-        ID: 'g-' + idIndex++,   // we need to have unique ID for each PromptStarter - also different from normal AIPRM prompts
+        ID: 'g-' + idIndex++, // we need to have unique ID for each PromptStarter - also different from normal AIPRM prompts
         Title: gizmo.Title + ' starter prompt',
         Prompt: p,
         IsGizmoStarterPrompt: true,
@@ -5225,7 +5387,9 @@ ${textContent}
       return;
     }
 
-    const starterPrompt = this.CurrentGizmo.PromptStarterS.find((p) => p.ID === starterPromptID);
+    const starterPrompt = this.CurrentGizmo.PromptStarterS.find(
+      (p) => p.ID === starterPromptID
+    );
     if (!starterPrompt) {
       console.error('useGizmoStarterPrompt: No starter prompt with ID');
       return;
@@ -6248,7 +6412,10 @@ ${textContent}
     templates = await this.filterPromptTemplates(templates);
 
     let templatesWithGizmoStarterPrompts = [];
-    if (this.PromptTemplatesType === PromptTemplatesType.PUBLIC && this.CurrentGizmo) {
+    if (
+      this.PromptTemplatesType === PromptTemplatesType.PUBLIC &&
+      this.CurrentGizmo
+    ) {
       // only show Gizmo starter prompts on Public tab
       const gizmoStarterPrompts = this.CurrentGizmo?.PromptStarterS || [];
       templatesWithGizmoStarterPrompts = [...gizmoStarterPrompts, ...templates];
@@ -6449,7 +6616,7 @@ ${textContent}
 
     await this.showSavePromptModal(
       new CustomEvent(editPromptTemplateEvent),
-      prompt
+      prompt.PluginS
     );
 
     // Pre-fill the prompt template modal with the prompt template
@@ -7493,7 +7660,7 @@ ${textContent}
 
     await this.showSavePromptModal(
       new CustomEvent(forkPromptTemplateEvent),
-      prompt
+      promptOriginal.PluginS
     );
 
     // Pre-fill the prompt template modal with the prompt template
@@ -7536,7 +7703,7 @@ ${textContent}
 
     await this.showSavePromptModal(
       new CustomEvent(clonePromptTemplateEvent),
-      prompt
+      promptOriginal.PluginS
     );
 
     // Pre-fill the prompt template modal with the cloned prompt template
