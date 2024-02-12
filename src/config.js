@@ -7,11 +7,11 @@ const getEnvironmentConfig = () => {
     case 'production':
       return {
         APIEndpoint: 'https://api.aiprm.com/api7',
-        APIEndpointAPP: 'https://app1.aiprm.com/api',
-        AppAccountURL: 'https://app1.aiprm.com/account',
-        AppPricingURL: 'https://app1.aiprm.com/pricing',
-        AppSignupURL: 'https://app1.aiprm.com/signup',
-        AppTeamURL: 'https://app1.aiprm.com/teams',
+        APIEndpointAPP: 'https://app.aiprm.com/api',
+        AppAccountURL: 'https://app.aiprm.com/account',
+        AppPricingURL: 'https://app.aiprm.com/pricing',
+        AppSignupURL: 'https://app.aiprm.com/signup',
+        AppTeamURL: 'https://app.aiprm.com/teams',
       };
     case 'test':
       return {
@@ -33,12 +33,12 @@ const getEnvironmentConfig = () => {
       };
     default:
       return {
-        APIEndpoint: 'https://api.aiprm.com/api6',
-        APIEndpointAPP: 'https://app1.aiprm.com/api',
-        AppAccountURL: 'https://app1.aiprm.com/account',
-        AppPricingURL: 'https://app1.aiprm.com/pricing',
-        AppSignupURL: 'https://app1.aiprm.com/signup',
-        AppTeamURL: 'https://app1.aiprm.com/teams',
+        APIEndpoint: 'https://api.aiprm.com/api7',
+        APIEndpointAPP: 'https://app.aiprm.com/api',
+        AppAccountURL: 'https://app.aiprm.com/account',
+        AppPricingURL: 'https://app.aiprm.com/pricing',
+        AppSignupURL: 'https://app.aiprm.com/signup',
+        AppTeamURL: 'https://app.aiprm.com/teams',
       };
   }
 };
@@ -87,6 +87,7 @@ const AppCommunityForumURL =
 const QuotaMessagesURL =
   'https://api.aiprm.com/json/quota-messages-20230324.json?v=';
 const ConfigURL = 'https://api.aiprm.com/json/config-20231111.json?v=';
+const AuxIndexLookupDefinition = /^\$\[(\w+::)?(\w+)(\(\d+\))?:([^\n]+)\]$/gm;
 
 const ValidateVariableMaxCount = 6;
 const ValidateVariablePlaceholder = /\[VARIABLE([0-9]+)\]/g;
@@ -127,6 +128,7 @@ export {
   ValidateVariableMaxCount,
   ValidateVariablePlaceholder,
   ValidateVariableDefinition,
+  AuxIndexLookupDefinition,
 };
 
 /** @typedef {{Enabled: boolean, Config: {APIEndpointURL: string, MaxCharacters: number, MaxWords: number, CrawledTextPrompt: string, CrawledSourcePrompt: string}}} LiveCrawlingConfig */
@@ -163,6 +165,7 @@ export {
  * @property {string} SavePromptAsTemplatePromptText
  * @property {string} GizmosTitle
  * @property {number} GizmosTitleIndex
+ * @property {string} GizmosContentContainer
  * @property {string} CurrentGizmoTitle
  * @property {string} CurrentGizmoPromptStarters
  */

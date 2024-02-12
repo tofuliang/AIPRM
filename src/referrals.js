@@ -1,11 +1,6 @@
 import { ReactionNo } from './rxn.js';
 
-import {
-  css,
-  formatDateTime,
-  hideModal,
-  svg,
-} from './utils.js';
+import { css, formatDateTime, hideModal, svg } from './utils.js';
 
 import { NotificationSeverity } from './enums.js';
 
@@ -59,7 +54,9 @@ export class Referrals {
       const button = document.createElement('a');
       button.id = 'referral-button';
       button.className = css`ExportButton`;
-      button.innerHTML = /*html*/ `${svg`Referral`} ${this.config.Title} ${this.config.NewFeatureBadge}`;
+      button.innerHTML = /*html*/ `${svg`Referral`} ${this.config.Title} ${
+        this.config.NewFeatureBadge
+      }`;
       button.onclick = this.show.bind(this);
 
       afterElement.after(button);
@@ -103,17 +100,17 @@ export class Referrals {
 
     referralModal.innerHTML = /*html*/ `
         <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
-            <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+            <div class="AIPRM__absolute AIPRM__bg-black/50 dark:AIPRM__bg-black/80 AIPRM__inset-0">
             </div>
 
             <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
                 <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
                     <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
                         <div
-                            class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+                            class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-900 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
                             role="dialog" aria-modal="true" aria-labelledby="modal-headline">
 
-                            <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4">
+                            <div class="AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4">
 
                                 <h3 class="AIPRM__m-0 AIPRM__text-gray-900 dark:AIPRM__text-gray-100 AIPRM__text-xl AIPRM__border-b AIPRM__border-gray-200 dark:AIPRM__border-gray-700 AIPRM__my-4">${
                                   this.config.Title
@@ -130,7 +127,7 @@ export class Referrals {
                                 </div>
                             </div>
 
-                            <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+                            <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
                                 <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
                                         onclick="AIPRM.hideModal('referralModal')"> Close
                                 </button>

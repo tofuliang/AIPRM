@@ -31,6 +31,7 @@ import {
   ValidateVariableMaxCount,
   ValidateVariablePlaceholder,
   ValidateVariableDefinition,
+  AuxIndexLookupDefinition,
 } from './config.js';
 
 /* eslint-disable no-unused-vars */
@@ -554,6 +555,13 @@ window.AIPRM = {
 
     this.replaceFetch();
 
+    // Initialize Referrals before observer to add button to the sidebar
+    this.Referrals = new Referrals(
+      this.Client,
+      this.Config.getReferralsConfig(),
+      this.showNotification
+    );
+
     this.createObserver();
 
     if (
@@ -585,12 +593,6 @@ window.AIPRM = {
     ]);
 
     await this.storeMyProfileInfoFromLocalStorage();
-
-    this.Referrals = new Referrals(
-      this.Client,
-      this.Config.getReferralsConfig(),
-      this.showNotification
-    );
 
     this.insertLanguageToneWritingStyleContinueActions();
     this.insertIncludeMyProfileInfo();
@@ -2009,6 +2011,9 @@ ${textContent}
       // If the request is for the message feedback API, track the message feedback
       if (t?.[0].match(config.EndpointMessageFeedback)) {
         // Only track the message feedback if the current page URL contains Gizmo code
+
+        // TODO: This doesn't work properly with inline tagging of GPTs
+        // (conversation possibly includes multiple GPTs, but the GizmoCode is not included in the message feedback request)
         const GizmoCode = window.location.href.match(config.GizmoCodePattern);
 
         if (!GizmoCode?.[1]) {
@@ -2089,10 +2094,7 @@ ${textContent}
         body = JSON.parse(options.body);
 
         // Track Gizmo usage
-        if (
-          body?.conversation_mode?.gizmo &&
-          body?.conversation_mode?.gizmo_id
-        ) {
+        if (body?.conversation_mode?.gizmo_id) {
           // The first message in the conversation
           if (!body?.conversation_id) {
             this.Client.useGizmo(
@@ -2123,13 +2125,11 @@ ${textContent}
         // namespace, namespace delimiter and max count of chunks returned are optional
 
         // TODO: move to remote config for hotfixes
-        useAuxIndexLookup = this.Client.UserQuota.hasCustomIndexesFeatureEnabled() && prompt.match(
-          ///^\$(\w+::)?(\w+)(\(\d+\))?:([\w !$%&-§%\/\t\"\'\`\´.!?¿¡。‼⁇‽։;؟]+)$/gm
-          /^\$(\w+::)?(\w+)(\(\d+\))?:([^\n]+)$/gm
-        );
+        useAuxIndexLookup =
+          this.Client.UserQuota.hasCustomIndexesFeatureEnabled() &&
+          prompt.match(AuxIndexLookupDefinition);
 
-        // TODO: remove debug
-        console.log('replaceFetch: useAuxIndexLookup', !!useAuxIndexLookup);
+        // console.log('replaceFetch: useAuxIndexLookup', !!useAuxIndexLookup);
       } catch (error) {
         console.error('replaceFetch: Error parsing request body', error);
         return this.fetch(...t);
@@ -2336,19 +2336,21 @@ ${textContent}
         // Clear the selected prompt template
         await this.selectPromptTemplateByIndex(null);
 
-        console.log('prompt: ', prompt);
+        // console.log('prompt: ', prompt);
 
-        console.log(
-          'promptPrepared: ',
-          body.messages[0].content.parts[messagePartIndex]
-        );
+        // console.log(
+        //   'promptPrepared: ',
+        //   body.messages[0].content.parts[messagePartIndex]
+        // );
 
         // TODO: Custom index lookup could be also specified as a prompt template variable value?
         // TODO: YES
         // 2nd check for custom index lookup
-        useAuxIndexLookup = this.Client.UserQuota.hasCustomIndexesFeatureEnabled() && body.messages[0].content.parts[
-          messagePartIndex
-        ].match(/^\$(\w+::)?(\w+)(\(\d+\))?:([^\n]+)$/gm);
+        useAuxIndexLookup =
+          this.Client.UserQuota.hasCustomIndexesFeatureEnabled() &&
+          body.messages[0].content.parts[messagePartIndex].match(
+            AuxIndexLookupDefinition
+          );
 
         // Augment prompt with custom index lookup
         if (useAuxIndexLookup) {
@@ -2483,6 +2485,19 @@ ${textContent}
       return;
     }
 
+    // "Explore GPTs" or "My GPTs" page - setup sidebar and hide "Export Button", but continue with other actions
+    if (
+      e.className &&
+      e.className === selectorConfig.GizmosContentContainer &&
+      window.location.href.match(this.Config.getEndpointGizmos())
+    ) {
+      this.setupSidebar();
+
+      // No export possible on these pages
+      const button = document.getElementById('export-button');
+      if (button) button.style = 'pointer-events: none;opacity: 0.5';
+    }
+
     // Disable "Export Button" when no chat were started.
     // Insert "Prompt Templates" section to the main page.
     // Insert language select and continue button above the prompt textarea input
@@ -2582,7 +2597,7 @@ ${textContent}
       <div class="AIPRM__flex AIPRM__flex-1 AIPRM__gap-3.5 AIPRM__justify-between AIPRM__items-center AIPRM__flex-col sm:AIPRM__flex-row AIPRM__mt-10 AIPRM__my-4">
         <div class="AIPRM__text-left" style="margin-top: -1rem;">
           <label class="AIPRM__block AIPRM__text-sm AIPRM__font-medium" title="The number of GPTs per page">GPTs per Page</label>
-          <select class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900 gizmosPageSizeSelect">
+          <select class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-800 gizmosPageSizeSelect">
             ${pageSizeOptions
               .map(
                 (pageSize) => /*html*/ `
@@ -2603,7 +2618,7 @@ ${textContent}
         </span>
         <div class="${css`paginationButtonGroup`}">
           <button onclick="AIPRM.prevGizmosPage()" class="${css`paginationButton`} AIPRM__text-sm" style="border-radius: 6px 0 0 6px">Prev</button>
-          <button onclick="AIPRM.nextGizmosPage()" class="${css`paginationButton`} AIPRM__border-0 AIPRM__border-l AIPRM__border-gray-500 AIPRM__text-sm" style="border-radius: 0 6px 6px 0">Next</button>
+          <button onclick="AIPRM.nextGizmosPage()" class="${css`paginationButton`} AIPRM__border-0 AIPRM__border-l AIPRM__border-gray-500 dark:AIPRM__border-gray-700 AIPRM__text-sm" style="border-radius: 0 6px 6px 0">Next</button>
         </div>
       </div>`;
 
@@ -2615,7 +2630,7 @@ ${textContent}
         <div>
           <label for="gizmoSortBySelect" class="AIPRM__block AIPRM__text-sm AIPRM__font-medium">Sort by</label>
       
-          <select id="gizmoSortBySelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900">
+          <select id="gizmoSortBySelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-800">
             ${Object.keys(SortModeNo)
               .map(
                 (sortMode) => /*html*/ `
@@ -2630,10 +2645,10 @@ ${textContent}
         <div class="AIPRM__whitespace-nowrap AIPRM__flex">
           <button title="Submit a new GPT" 
             onclick="event.preventDefault(); AIPRM.submitNewGPT()" 
-            class="AIPRM__rounded AIPRM__justify-center AIPRM__items-center AIPRM__hidden lg:AIPRM__inline-block AIPRM__mr-1 AIPRM__p-2 AIPRM__px-2.5 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+            class="AIPRM__rounded AIPRM__justify-center AIPRM__items-center AIPRM__hidden lg:AIPRM__inline-block AIPRM__mr-1 AIPRM__p-2 AIPRM__px-2.5 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-800">
             ${svg('Plus')}
           </button>
-          <input id="gizmoSearchInput" type="search" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__inline-block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 lg:AIPRM__w-[260px]" placeholder="Search" 
+          <input id="gizmoSearchInput" type="search" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__inline-block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 lg:AIPRM__w-[260px] dark:hover:AIPRM__bg-gray-800" placeholder="Search" 
             value="${sanitizeInput(
               this.GizmoSearch
             )}" onfocus="this.value = this.value">          
@@ -2642,7 +2657,7 @@ ${textContent}
         <div class="lg:AIPRM__hidden AIPRM__col-start-2">
           <button title="Submit a new GPT" 
             onclick="event.preventDefault(); AIPRM.submitNewGPT()" 
-            class="AIPRM__text-sm AIPRM__rounded AIPRM__w-full AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+            class="AIPRM__text-sm AIPRM__rounded AIPRM__w-full AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-800">
             ${svg('Plus')} &nbsp; Submit a new GPT
           </button>
         </div>
@@ -2668,7 +2683,7 @@ ${textContent}
           ${gptsForPage
             .map((gpt) => {
               return /*html*/ `
-                <button class="AIPRM__flex AIPRM__flex-col AIPRM__gap-2 AIPRM__w-full AIPRM__bg-gray-50 dark:AIPRM__bg-white/5 AIPRM__p-4 AIPRM__rounded-md hover:AIPRM__bg-gray-200 dark:hover:AIPRM__bg-gray-900 AIPRM__text-left AIPRM__relative AIPRM__group" onclick="AIPRM.selectGizmo('${sanitizeInput(
+                <button class="AIPRM__flex AIPRM__flex-col AIPRM__gap-2 AIPRM__w-full AIPRM__bg-gray-50 dark:AIPRM__bg-white/5 AIPRM__p-4 AIPRM__rounded-md hover:AIPRM__bg-gray-200 dark:hover:AIPRM__bg-gray-800 AIPRM__text-left AIPRM__relative AIPRM__group" onclick="AIPRM.selectGizmo('${sanitizeInput(
                   gpt.GizmoCode
                 )}')">
                   <div class="flex AIPRM__gap-6 AIPRM__w-full AIPRM__justify-between">
@@ -2766,7 +2781,7 @@ ${textContent}
 
         ${gizmos.length > this.GizmoSection.pageSize ? paginationContainer : ''}
 
-        <div class="AIPRM__h-px AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700"></div>
+        <div class="AIPRM__h-px AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850"></div>
       </div>
     `;
 
@@ -2863,7 +2878,7 @@ ${textContent}
     sidebarIcon.id = 'AIPRM__sidebar-icon';
 
     sidebarIcon.className =
-      'AIPRM__p-2 AIPRM__top-12 md:AIPRM__top-2 AIPRM__p-2 AIPRM__items-center AIPRM__transition-colors AIPRM__duration-200 AIPRM__cursor-pointer AIPRM__text-sm AIPRM__rounded-md AIPRM__border AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__border-black/10 dark:AIPRM__border-white/20 hover:AIPRM__bg-gray-50 dark:hover:AIPRM__bg-gray-700 AIPRM__cursor-pointer AIPRM__fixed AIPRM__right-4 AIPRM__z-30';
+      'AIPRM__p-2 AIPRM__top-12 md:AIPRM__top-2 AIPRM__p-2 AIPRM__items-center AIPRM__transition-colors AIPRM__duration-200 AIPRM__cursor-pointer AIPRM__text-sm AIPRM__rounded-md AIPRM__border AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__border-black/10 dark:AIPRM__border-white/20 hover:AIPRM__bg-gray-50 dark:hover:AIPRM__bg-gray-850 AIPRM__cursor-pointer AIPRM__fixed AIPRM__right-4 AIPRM__z-30';
 
     sidebarIcon.title = 'Open AIPRM sidebar';
 
@@ -2891,11 +2906,11 @@ ${textContent}
     sidebar.id = 'AIPRM__sidebar';
 
     sidebar.className =
-      '2xl:AIPRM__w-7/12 lg:AIPRM__w-3/4 md:AIPRM__w-11/12 AIPRM__w-full AIPRM__h-full AIPRM__bg-white AIPRM__text-gray-700 AIPRM__shadow-lg AIPRM__absolute AIPRM__right-0 AIPRM__overflow-auto AIPRM__z-20 dark:AIPRM__bg-gray-800 dark:AIPRM__text-white AIPRM__ease-in-out AIPRM__duration-300 AIPRM__translate-x-full';
+      '2xl:AIPRM__w-7/12 lg:AIPRM__w-3/4 md:AIPRM__w-11/12 AIPRM__w-full AIPRM__h-full AIPRM__bg-white AIPRM__text-gray-700 AIPRM__shadow-lg AIPRM__absolute AIPRM__right-0 AIPRM__overflow-auto AIPRM__z-20 dark:AIPRM__bg-gray-900 dark:AIPRM__text-white AIPRM__ease-in-out AIPRM__duration-300 AIPRM__translate-x-full dark:AIPRM__shadow-gray-600/50';
 
     sidebar.innerHTML = /*html*/ `
           <div class="AIPRM__relative" title="Close AIPRM sidebar" id="AIPRM__sidebar-container">
-            <div class="AIPRM__p-2 AIPRM__items-center AIPRM__transition-colors AIPRM__duration-200 AIPRM__cursor-pointer AIPRM__text-sm AIPRM__rounded-md AIPRM__border AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__border-black/10 dark:AIPRM__border-white/20 hover:AIPRM__bg-gray-50 dark:hover:AIPRM__bg-gray-700 AIPRM__absolute AIPRM__top-0 AIPRM__left-4 AIPRM__z-30" onclick="document.getElementById('AIPRM__sidebar-icon').click()">
+            <div class="AIPRM__p-2 AIPRM__items-center AIPRM__transition-colors AIPRM__duration-200 AIPRM__cursor-pointer AIPRM__text-sm AIPRM__rounded-md AIPRM__border AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__border-black/10 dark:AIPRM__border-white/20 hover:AIPRM__bg-gray-50 dark:hover:AIPRM__bg-gray-850 AIPRM__absolute AIPRM__top-0 AIPRM__left-4 AIPRM__z-30" onclick="document.getElementById('AIPRM__sidebar-icon').click()">
               <div class="AIPRM__invert dark:AIPRM__filter-none AIPRM__sidebar-icon AIPRM__w-12 AIPRM__h-12"></div>
             </div>
 
@@ -2904,8 +2919,8 @@ ${textContent}
         `;
 
     // Add sidebar icon and sidebar to the page
-    document.querySelector(selectorConfig.Sidebar).appendChild(sidebarIcon);
-    document.querySelector(selectorConfig.Sidebar).appendChild(sidebar);
+    document.querySelector(selectorConfig.Sidebar)?.appendChild(sidebarIcon);
+    document.querySelector(selectorConfig.Sidebar)?.appendChild(sidebar);
   },
 
   updateShareButton() {
@@ -3773,7 +3788,7 @@ ${textContent}
 
     savePromptModal.innerHTML = /*html*/ `
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
-        <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+        <div class="AIPRM__absolute AIPRM__bg-black/50 dark:AIPRM__bg-black/80 AIPRM__inset-0">
         </div>
 
         <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
@@ -3781,17 +3796,17 @@ ${textContent}
 
             <form id="savePromptForm">
               <div
-                class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+                class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-900 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
                 role="dialog" aria-modal="true" aria-labelledby="modal-headline">
 
                 <div
-                  class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__overflow-y-auto">
+                  class="AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__overflow-y-auto">
 
                   <div class="AIPRM__flex AIPRM__justify-end AIPRM__mb-2 ${
                     e ? 'AIPRM__hidden' : ''
                   }">
                     <ul
-                      class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-900 AIPRM__flex AIPRM__gap-1 AIPRM__list-none AIPRM__p-1 AIPRM__relative AIPRM__rounded-xl AIPRM__text-gray-900 AIPRM__text-sm">
+                      class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 AIPRM__flex AIPRM__gap-1 AIPRM__list-none AIPRM__p-1 AIPRM__relative AIPRM__rounded-xl AIPRM__text-gray-900 AIPRM__text-sm">
                       <li>
                         <input class="AIPRM__hidden" type="radio" name="createPromptMode" id="createPromptModeBasic"
                           value="${CreatePromptMode.BASIC}" ${
@@ -3839,7 +3854,7 @@ ${textContent}
 
                     <label>Prompt Template</label>
                     <textarea name="Prompt"
-                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
+                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
                       style="height: 120px;" ${
                         isAdvancedMode ? ' required ' : ''
                       }
@@ -3853,7 +3868,7 @@ ${textContent}
                       isAdvancedMode ? ' required ' : ''
                     }
                       title="Short teaser for this prompt template, e.g. 'Create a keyword strategy and SEO content plan from 1 [KEYWORD]'"
-                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
+                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
                       style="height: 71px;"
                       placeholder="Create a keyword strategy and SEO content plan from 1 [KEYWORD]"></textarea>
 
@@ -3862,7 +3877,7 @@ ${textContent}
                       isAdvancedMode ? 'required' : ''
                     } type="text"
                       title="Prompt hint for this prompt template, e.g. '[KEYWORD]' or '[your list of keywords, maximum ca. 8000]"
-                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
+                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
                       placeholder="[KEYWORD] or [your list of keywords, maximum ca. 8000]" />
 
                     <label>Title</label>
@@ -3870,13 +3885,13 @@ ${textContent}
                       ${
                         isAdvancedMode ? 'required' : ''
                       } placeholder="Keyword Strategy"
-                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2" />
+                      class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2" />
 
                     <div class="AIPRM__flex">
                       <div class="AIPRM__mr-4 AIPRM__w-full">
                         <label>Topic</label>
                         <select name="Community"
-                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full"
+                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full"
                           ${isAdvancedMode ? ' required ' : ''}>
                           ${this.Topics.map(
                             (topic) => /*html*/ `
@@ -3891,7 +3906,7 @@ ${textContent}
                       <div class="AIPRM__w-full">
                         <label>Activity</label>
                         <select name="Category"
-                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full"
+                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full"
                           ${isAdvancedMode ? ' required ' : ''}>
                           ${this.getActivities(
                             this.PromptTopic === DefaultPromptTopic
@@ -3913,7 +3928,7 @@ ${textContent}
                       <div class="AIPRM__mr-4 AIPRM__w-full">
                         <label>Who can see this?</label>
                         <select name="PromptTypeNo"
-                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full"
+                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full"
                           ${isAdvancedMode ? ' required ' : ''}>
                           <option value="${
                             PromptTypeNo.PRIVATE
@@ -3931,7 +3946,7 @@ ${textContent}
                       <div class="AIPRM__w-full">
                         <label>Made for</label>
                         <select multiple multiselect-max-items="1" multiselect-hide-x="true" name="ModelS"
-                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                          class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full">
                           
                           ${
                             this.CurrentGizmo
@@ -3966,13 +3981,13 @@ ${textContent}
                         <div class="AIPRM__mr-4 AIPRM__w-full"><label>Author Name</label>
                           <input name="AuthorName" type="text" title="Author Name visible for all users"
                             placeholder="Author Name"
-                            class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
+                            class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
                         </div>
 
                         <div class="AIPRM__w-full"><label>Author URL</label>
                           <input name="AuthorURL" type="url" title="Author URL visible for all users"
                             placeholder="https://www.example.com/"
-                            class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
+                            class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
                         </div>
                       </div>
 
@@ -3989,7 +4004,7 @@ ${textContent}
 
                 </div>
 
-                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
                   <button type="button"
                     class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
                     onclick="AIPRM.hideSavePromptModal()"> Cancel
@@ -4347,7 +4362,9 @@ ${textContent}
           ) ||
           template.AuthorName.toLowerCase().includes(
             this.PromptSearch.toLowerCase()
-          ))
+          ) ||
+          template.ID == this.PromptSearch ||
+          template?._ID == this.PromptSearch)
       );
     });
   },
@@ -4431,6 +4448,7 @@ ${textContent}
     templates = await Promise.all(
       templates.map(async (template, index) => ({
         ...template,
+        _ID: template.ID,
         ID: index,
         IsHidden: await this.isHidden(template),
       }))
@@ -4511,7 +4529,7 @@ ${textContent}
     <div class="AIPRM__flex AIPRM__flex-1 AIPRM__gap-3.5 AIPRM__justify-between AIPRM__items-center AIPRM__flex-col sm:AIPRM__flex-row AIPRM__mt-6">
       <div class="AIPRM__text-left" style="margin-top: -1rem;">
         <label class="AIPRM__block AIPRM__text-sm AIPRM__font-medium" title="The number of prompt templates per page">Prompts per Page</label>
-        <select class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900 pageSizeSelect">
+        <select class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-800 pageSizeSelect">
           ${pageSizeOptions
             .map(
               (pageSize) => /*html*/ `
@@ -4549,7 +4567,7 @@ ${textContent}
           ? /*html*/ `
           <div class="lg:AIPRM__absolute AIPRM__top-0 AIPRM__right-0 AIPRM__text-right">
             <a title="Close AIPRM sidebar"
-              class="AIPRM__p-2 AIPRM__cursor-pointer AIPRM__align-middle AIPRM__inline-block AIPRM__rounded-md hover:AIPRM__bg-gray-100 hover:AIPRM__text-gray-700 dark:AIPRM__text-gray-400 dark:hover:AIPRM__bg-gray-700 dark:hover:AIPRM__text-gray-200 disabled:dark:hover:AIPRM__text-gray-400" 
+              class="AIPRM__p-2 AIPRM__cursor-pointer AIPRM__align-middle AIPRM__inline-block AIPRM__rounded-md hover:AIPRM__bg-gray-100 hover:AIPRM__text-gray-700 dark:AIPRM__text-gray-400 dark:hover:AIPRM__bg-gray-850 dark:hover:AIPRM__text-gray-200 disabled:dark:hover:AIPRM__text-gray-400" 
               onclick="event.stopPropagation(); document.getElementById('AIPRM__sidebar-icon').click()">
               ${svg('CrossExtraLarge')}
             </a>
@@ -4582,7 +4600,7 @@ ${textContent}
                     <input type="checkbox" value="" class="AIPRM__sr-only AIPRM__peer" id="adminMode" onchange="AIPRM.toggleAdminMode()" ${
                       this.AdminMode ? ' checked' : ''
                     }>
-                    <div class="AIPRM__w-9 AIPRM__h-5 AIPRM__bg-gray-200 peer-focus:AIPRM__outline-none AIPRM__rounded-full AIPRM__peer dark:AIPRM__bg-gray-700 peer-checked:after:AIPRM__translate-x-full peer-checked:after:AIPRM__border-white after:AIPRM__content-[''] after:AIPRM__absolute after:AIPRM__top-[2px] after:AIPRM__left-[2px] after:AIPRM__bg-white after:AIPRM__border-gray-300 after:AIPRM__border after:AIPRM__rounded-full after:AIPRM__h-4 after:AIPRM__w-4 after:AIPRM__transition-all dark:AIPRM__border-gray-600 peer-checked:AIPRM__bg-gray-600"></div>
+                    <div class="AIPRM__w-9 AIPRM__h-5 AIPRM__bg-gray-200 peer-focus:AIPRM__outline-none AIPRM__rounded-full AIPRM__peer dark:AIPRM__bg-gray-850 peer-checked:after:AIPRM__translate-x-full peer-checked:after:AIPRM__border-white after:AIPRM__content-[''] after:AIPRM__absolute after:AIPRM__top-[2px] after:AIPRM__left-[2px] after:AIPRM__bg-white after:AIPRM__border-gray-300 after:AIPRM__border after:AIPRM__rounded-full after:AIPRM__h-4 after:AIPRM__w-4 after:AIPRM__transition-all dark:AIPRM__border-gray-600 peer-checked:AIPRM__bg-gray-600"></div>
                     <span class="AIPRM__ml-3 AIPRM__text-sm AIPRM__font-medium AIPRM__text-gray-900 dark:AIPRM__text-gray-300"></span>
                   </label>
                 `
@@ -4617,7 +4635,7 @@ ${textContent}
                 this.PromptTemplatesList === favoritesList.ID
                   ? 'AIPRM__bg-gray-50 dark:AIPRM__bg-white/5'
                   : ''
-              } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__w-full">
+              } dark:hover:AIPRM__bg-gray-800 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__w-full">
               ${svg('StarSolidLarge')} &nbsp; Favorites 
             </a>
           </li>
@@ -4633,7 +4651,7 @@ ${textContent}
                 this.PromptTemplatesList === AIPRMVerifiedList?.ID
                   ? 'AIPRM__bg-gray-50 dark:AIPRM__bg-white/5'
                   : ''
-              } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__w-full">
+              } dark:hover:AIPRM__bg-gray-800 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__w-full">
               ${svg('CheckBadgeSolidLarge')} &nbsp; AIPRM
             </a>
           </li>
@@ -4646,7 +4664,7 @@ ${textContent}
               this.PromptTemplatesType === PromptTemplatesType.PUBLIC
                 ? 'AIPRM__bg-gray-50 dark:AIPRM__bg-white/5'
                 : ''
-            } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__inline-block AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__w-full">
+            } dark:hover:AIPRM__bg-gray-800 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__inline-block AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__w-full">
               Public
             </a>
           </li>
@@ -4659,7 +4677,7 @@ ${textContent}
               this.PromptTemplatesType === PromptTemplatesType.OWN
                 ? 'AIPRM__bg-gray-50 dark:AIPRM__bg-white/5'
                 : ''
-            } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__inline-block AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__w-full">
+            } dark:hover:AIPRM__bg-gray-800 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__inline-block AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__w-full">
               Own
             </a>
           </li>
@@ -4681,7 +4699,7 @@ ${textContent}
                         this.PromptTemplatesList === list.ID
                           ? 'AIPRM__bg-gray-50 dark:AIPRM__bg-white/5'
                           : ''
-                      } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__gap-2 AIPRM__w-full"> 
+                      } dark:hover:AIPRM__bg-gray-800 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__gap-2 AIPRM__w-full"> 
                       ${
                         list.ListTypeNo === ListTypeNo.TEAM_CUSTOM
                           ? list.HasWriteAccessForTeamMember(
@@ -4713,7 +4731,7 @@ ${textContent}
               this.PromptTemplatesList === hiddenList.ID
                 ? 'AIPRM__bg-gray-50 dark:AIPRM__bg-white/5'
                 : ''
-            } dark:hover:AIPRM__bg-gray-900 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__w-full">
+            } dark:hover:AIPRM__bg-gray-800 dark:hover:AIPRM__text-gray-300 hover:AIPRM__bg-gray-50 hover:AIPRM__text-gray-600 AIPRM__p-4 AIPRM__rounded-t-lg AIPRM__flex AIPRM__justify-center AIPRM__w-full">
               ${svg('EyeSlash')} &nbsp; Hidden
             </a>
           </li>
@@ -4721,7 +4739,7 @@ ${textContent}
           <li class="AIPRM__flex-1">
             <a href="#" id="addNewListTab" title="Create New List" 
             onclick="AIPRM.showListCreateModal()" 
-            class="AIPRM__rounded AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__m-2 AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+            class="AIPRM__rounded AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__m-2 AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-800">
             ${svg('Plus')} &nbsp; Add List
             </a>
           </li>
@@ -4731,7 +4749,7 @@ ${textContent}
           <div>
             <label for="topicSelect" class="AIPRM__block AIPRM__text-sm AIPRM__font-medium">Topic</label>
         
-            <select id="topicSelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900">
+            <select id="topicSelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-800">
               <option value="${DefaultPromptTopic}" 
               ${
                 this.PromptTopic === DefaultPromptTopic ? 'selected' : ''
@@ -4749,7 +4767,7 @@ ${textContent}
           <div>
             <label for="activitySelect" class="AIPRM__block AIPRM__text-sm AIPRM__font-medium">Activity</label>
         
-            <select id="activitySelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900">
+            <select id="activitySelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-800">
               <option value="${DefaultPromptActivity}" 
               ${
                 this.PromptActivity === DefaultPromptActivity ? 'selected' : ''
@@ -4769,7 +4787,7 @@ ${textContent}
           <div>
             <label for="sortBySelect" class="AIPRM__block AIPRM__text-sm AIPRM__font-medium">Sort by</label>
         
-            <select id="sortBySelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900">
+            <select id="sortBySelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-800">
               ${Object.keys(SortModeNo)
                 .map(
                   (sortMode) => /*html*/ `
@@ -4786,7 +4804,7 @@ ${textContent}
           <div>
             <label for="modelSelect" class="AIPRM__block AIPRM__text-sm AIPRM__font-medium">Model</label>
         
-            <select id="modelSelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-900">
+            <select id="modelSelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 dark:hover:AIPRM__bg-gray-800">
               <option value="${DefaultPromptModel}" 
               ${
                 this.PromptModel === DefaultPromptModel ? 'selected' : ''
@@ -4823,10 +4841,10 @@ ${textContent}
           <div class="AIPRM__whitespace-nowrap AIPRM__flex">
             <button title="Create New Prompt" 
               onclick="event.preventDefault(); AIPRM.createNewPrompt()" 
-              class="AIPRM__rounded AIPRM__justify-center AIPRM__items-center AIPRM__hidden lg:AIPRM__inline-block AIPRM__mr-1 AIPRM__p-2 AIPRM__px-2.5 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+              class="AIPRM__rounded AIPRM__justify-center AIPRM__items-center AIPRM__hidden lg:AIPRM__inline-block AIPRM__mr-1 AIPRM__p-2 AIPRM__px-2.5 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-800">
               ${svg('Plus')}
             </button>
-            <input id="promptSearchInput" type="search" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__inline-block AIPRM__w-full dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 lg:AIPRM__w-[260px]" placeholder="Search" 
+            <input id="promptSearchInput" type="search" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded AIPRM__inline-block AIPRM__w-full dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 lg:AIPRM__w-[260px] dark:hover:AIPRM__bg-gray-800" placeholder="Search" 
             value="${sanitizeInput(
               this.PromptSearch
             )}" onfocus="this.value = this.value">
@@ -4835,7 +4853,7 @@ ${textContent}
           <div class="lg:AIPRM__hidden">
             <button title="Create New Prompt" 
               onclick="event.preventDefault(); AIPRM.createNewPrompt()" 
-              class="AIPRM__rounded AIPRM__w-full AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-900">
+              class="AIPRM__rounded AIPRM__w-full AIPRM__flex AIPRM__justify-center AIPRM__items-center AIPRM__p-2 AIPRM__font-medium AIPRM__text-gray-800 AIPRM__bg-gray-100 hover:AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:AIPRM__text-gray-400 dark:hover:AIPRM__text-white dark:hover:AIPRM__bg-gray-800">
               ${svg('Plus')} &nbsp; Add Prompt
             </button>
           </div>
@@ -5224,8 +5242,9 @@ ${textContent}
 
     let wrapper = document.createElement('div');
     wrapper.id = 'templates-wrapper';
-    wrapper.className =
-      'AIPRM__mt-6 md:AIPRM__flex AIPRM__items-start AIPRM__text-center AIPRM__gap-2.5 AIPRM__max-w-full AIPRM__m-auto sm:AIPRM__mx-4 AIPRM__text-sm';
+    wrapper.className = `AIPRM__mt-6 md:AIPRM__flex AIPRM__items-start AIPRM__text-center AIPRM__gap-2.5 AIPRM__max-w-full AIPRM__m-auto sm:AIPRM__mx-4 AIPRM__text-sm ${
+      !isSidebarView ? ' AIPRM__pt-16' : ''
+    }`;
 
     if (parent.querySelector('#templates-wrapper')) {
       wrapper = parent.querySelector('#templates-wrapper');
@@ -5551,19 +5570,19 @@ ${textContent}
 
     shareListWithTeamModal.innerHTML = /*html*/ `
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
-      <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+      <div class="AIPRM__absolute AIPRM__bg-black/50 dark:AIPRM__bg-black/80 AIPRM__inset-0">
       </div>
 
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
         <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
           <form>
             <div
-              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-900 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
               role="dialog" aria-modal="true" aria-labelledby="modal-headline">
 
-              <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__w-96">
+              <div class="AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__w-96">
                 <label>Share with Team</label>
-                <select id="shareListWithTeamSelectTeam" name="shareListWithTeamSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                <select id="shareListWithTeamSelectTeam" name="shareListWithTeamSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full">
                   ${
                     this.Client.OwnTeamS?.length > 0
                       ? this.Client.OwnTeamS.map(
@@ -5583,7 +5602,7 @@ ${textContent}
                 }
               </div>
 
-              <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+              <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
                 <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
                         onclick="AIPRM.hideShareListWithTeamModal()"> Cancel
                 </button>
@@ -6122,7 +6141,7 @@ ${textContent}
     wrapper.innerHTML = /*html*/ `
       <label class="AIPRM__text-sm AIPRM__items-center AIPRM__mx-2"
         title="Include provided &quot;My Profile&quot; info that you would like ChatGPT to know and remember about you and your preferences.">
-        <input name="includeMyProfile" type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
+        <input name="includeMyProfile" type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-850" 
           ${this.IncludeMyProfileMessage ? 'checked' : ''} ${
       this.MyProfileInfos.length > 0 ? '' : 'disabled'
     } />
@@ -6130,7 +6149,7 @@ ${textContent}
       </label>
 
       <div id="includeMyProfileInfoSelectWrapper" class="AIPRM__inline-block AIPRM__group">
-        <select id="includeMyProfileInfoSelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded dark:AIPRM__bg-gray-600 dark:AIPRM__border-gray-600 dark:group-hover:AIPRM__bg-gray-900 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white group-hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 sm:AIPRM__max-w-xs AIPRM__max-w-[6rem] ${
+        <select id="includeMyProfileInfoSelect" class="AIPRM__bg-gray-100 AIPRM__border-0 AIPRM__text-sm AIPRM__rounded dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-600 dark:group-hover:AIPRM__bg-gray-800 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white group-hover:AIPRM__bg-gray-200 focus:AIPRM__ring-0 sm:AIPRM__max-w-xs AIPRM__max-w-[6rem] ${
           !this.MyProfileInfos.length ? 'AIPRM__pointer-events-none' : ''
         }" 
           ${this.IncludeMyProfileMessage ? '' : 'disabled'}>
@@ -7257,7 +7276,7 @@ ${textContent}
                 name="${variableIDPrefix}${promptVariable.ID}"
                 title="${sanitizeInput(promptVariable.Label)}"
                 onchange="AIPRM.promptVariableEnumValueSelected(this)"
-                class="AIPRM__w-full AIPRM__border-0 AIPRM__rounded AIPRM__p-2 AIPRM__mt-1 AIPRM__bg-gray-100 dark:AIPRM__bg-gray-600 dark:AIPRM__border-gray-600 dark:hover:AIPRM__bg-gray-900 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200" required>
+                class="AIPRM__w-full AIPRM__border-0 AIPRM__rounded AIPRM__p-2 AIPRM__mt-1 AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-850 dark:hover:AIPRM__bg-gray-800 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200" required>
                   ${promptVariable.EnumS.slice(
                     0,
                     this.Client.UserQuota.promptVariableEnumMaxSize()
@@ -7286,7 +7305,7 @@ ${textContent}
               rows="1"
               title="${sanitizeInput(promptVariable.Label)}"
               placeholder="${sanitizeInput(promptVariable.Label)}"
-              class="AIPRM__w-full AIPRM__border-0 AIPRM__rounded AIPRM__p-2 AIPRM__mt-1 AIPRM__bg-gray-100 dark:AIPRM__bg-gray-600 dark:AIPRM__border-gray-600 dark:hover:AIPRM__bg-gray-900 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200">${sanitizeInput(
+              class="AIPRM__w-full AIPRM__border-0 AIPRM__rounded AIPRM__p-2 AIPRM__mt-1 AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-850 dark:hover:AIPRM__bg-gray-800 dark:AIPRM__placeholder-gray-400 dark:AIPRM__text-white hover:AIPRM__bg-gray-200">${sanitizeInput(
                 promptVariable.DefaultValue
               )}</textarea>
             `;
@@ -7468,41 +7487,41 @@ ${textContent}
 
     viewPromptModal.innerHTML = /*html*/ `
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
-        <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+        <div class="AIPRM__absolute AIPRM__bg-black/50 dark:AIPRM__bg-black/80 AIPRM__inset-0">
         </div>
 
         <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
           <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
             <form id="viewPromptForm">
               <div
-              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-900 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
               role="dialog" aria-modal="true" aria-labelledby="modal-headline">
           
-                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__overflow-y-auto">
+                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__overflow-y-auto">
                   <label>Prompt Template</label>
-                  <textarea disabled name="Prompt" class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 120px;" required
+                  <textarea disabled name="Prompt" class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 120px;" required
                             placeholder="Prompt text including placeholders [TARGETLANGUAGE] or [PROMPT] replaced automagically by AIPRM"
                             title="Prompt text including placeholders [TARGETLANGUAGE] or [PROMPT] replaced automagically by AIPRM"></textarea>
             
                   <label>Teaser</label>
                   <textarea disabled name="Teaser" required
                     title="Short teaser for this prompt template, e.g. 'Create a keyword strategy and SEO content plan from 1 [KEYWORD]'"
-                    class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 71px;"
+                    class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 71px;"
                     placeholder="Create a keyword strategy and SEO content plan from 1 [KEYWORD]"></textarea>
                     
                   <label>Prompt Hint</label>
                   <input disabled name="PromptHint" required type="text"
                     title="Prompt hint for this prompt template, e.g. '[KEYWORD]' or '[your list of keywords, maximum ca. 8000]"
-                    class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" placeholder="[KEYWORD] or [your list of keywords, maximum ca. 8000]" />
+                    class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" placeholder="[KEYWORD] or [your list of keywords, maximum ca. 8000]" />
 
                   <label>Title</label>
                   <input disabled name="Title" type="text" 
-                    title="Short title for this prompt template, e.g. 'Keyword Strategy'" required placeholder="Keyword Strategy" class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2" />
+                    title="Short title for this prompt template, e.g. 'Keyword Strategy'" required placeholder="Keyword Strategy" class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2" />
             
                   <div class="AIPRM__flex">
                     <div class="AIPRM__mr-4 AIPRM__w-full">
                       <label>Topic</label>
-                      <select disabled name="Community" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
+                      <select disabled name="Community" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full" required>
                         ${this.Topics.map(
                           (topic) => /*html*/ `
                               <option value="${sanitizeInput(topic.ID)}" ${
@@ -7514,7 +7533,7 @@ ${textContent}
 
                     <div class="AIPRM__w-full">
                       <label>Activity</label>
-                      <select disabled name="Category" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
+                      <select disabled name="Category" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full" required>
                         ${this.getActivities(prompt.Community)
                           .map(
                             (activity) => /*html*/ `
@@ -7529,7 +7548,7 @@ ${textContent}
 
                   <div>
                     <label>Made for</label>
-                    <div class="AIPRM__w-full AIPRM__border-gray-500 AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3 AIPRM__border">
+                    <div class="AIPRM__w-full AIPRM__border-gray-500 AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3 AIPRM__border">
                       ${
                         prompt.ModelS?.length > 0
                           ? prompt.ModelS?.map((modelID) => {
@@ -7563,18 +7582,18 @@ ${textContent}
                     <div class="AIPRM__flex AIPRM__justify-between AIPRM__mt-4">
                       <div class="AIPRM__mr-4 AIPRM__w-full"><label>Author Name</label>
                         <input disabled name="AuthorName" type="text" title="Author Name visible for all users"
-                              placeholder="Author Name" class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
+                              placeholder="Author Name" class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
                       </div>
 
                       <div class="AIPRM__w-full"><label>Author URL</label>
                         <input disabled name="AuthorURL" type="url" title="Author URL visible for all users"
-                              placeholder="https://www.example.com/" class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
+                              placeholder="https://www.example.com/" class="AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__mb-3 AIPRM__mt-2 AIPRM__p-2 AIPRM__w-full" />
                       </div>
                     </div>                
                   </div>
                 </div>
             
-                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
                   <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
                           onclick="AIPRM.hideViewPromptModal()"> Close
                   </button>
@@ -8029,17 +8048,17 @@ ${textContent}
 
     listSelectionModal.innerHTML = /*html*/ `
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
-        <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+        <div class="AIPRM__absolute AIPRM__bg-black/50 dark:AIPRM__bg-black/80 AIPRM__inset-0">
         </div>
 
         <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
           <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
             <form>
               <div
-                class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+                class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-900 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
                 role="dialog" aria-modal="true" aria-labelledby="modal-headline">
 
-                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__w-96">
+                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__w-96">
 
                   <input type="hidden" name="promptID" value="${sanitizeInput(
                     prompt.ID
@@ -8050,7 +8069,7 @@ ${textContent}
     }</h3>
 
                   <label class="AIPRM__block">Lists</label>
-                  <select name="listID" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                  <select name="listID" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full">
                     ${lists
                       .map((list) => {
                         if (
@@ -8100,7 +8119,7 @@ ${textContent}
                     <h3 class="${css`h3`} AIPRM__my-4 AIPRM__mt-6">Create a new list</h3>
                     
                     <label class="AIPRM__block">List Name</label>
-                    <input type="text" name="listName" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" ${
+                    <input type="text" name="listName" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full" ${
                       !(
                         lists.length ||
                         (prompt.PromptTypeNo !== PromptTypeNo.PRIVATE &&
@@ -8116,7 +8135,7 @@ ${textContent}
                         ? /*html*/ `
                         <label class="AIPRM__text-sm AIPRM__flex AIPRM__items-center" id="savePromptForm-public-checkbox">
                           <input id="createNewListShareWithTeam" name="createNewListShareWithTeam" 
-                            type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
+                            type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-850" 
                             onchange="AIPRM.toggleCreateNewListSelectTeam();"
                             ${onlyTeamLists ? 'checked disabled' : ''}> 
                           Share with Team
@@ -8125,7 +8144,7 @@ ${textContent}
                         <div id="createNewListSelectTeam" class="${
                           !onlyTeamLists ? 'AIPRM__hidden' : ''
                         }">
-                          <select id="createNewListSelectTeam" name="createNewListSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                          <select id="createNewListSelectTeam" name="createNewListSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full">
                             ${
                               this.Client.OwnTeamS?.length > 0
                                 ? this.Client.OwnTeamS.map(
@@ -8163,7 +8182,7 @@ ${textContent}
 
                 </div>
 
-                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
                   <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
                           onclick="AIPRM.hideModal('listSelectionModal')"> Cancel
                   </button>
@@ -8369,35 +8388,35 @@ ${textContent}
 
     listCreateModal.innerHTML = /*html*/ `
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
-        <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+        <div class="AIPRM__absolute AIPRM__bg-black/50 dark:AIPRM__bg-black/80 AIPRM__inset-0">
         </div>
 
         <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
           <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
             <form>
               <div
-                class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+                class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-900 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
                 role="dialog" aria-modal="true" aria-labelledby="modal-headline">
 
-                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__w-96">
+                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4 AIPRM__w-96">
 
                   <h3 class="${css`h3`} AIPRM__my-4">Create a new list</h3>
 
                     <label class="AIPRM__block">List Name</label>
-                    <input type="text" name="listName" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
+                    <input type="text" name="listName" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full" required>
 
                     ${
                       this.Client.UserQuota?.hasTeamsFeatureEnabled()
                         ? /*html*/ `
                         <label class="AIPRM__text-sm AIPRM__flex AIPRM__items-center" id="savePromptForm-public-checkbox">
                           <input id="createNewListShareWithTeam" name="createNewListShareWithTeam" 
-                            type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
+                            type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-850" 
                             onchange="AIPRM.toggleCreateNewListSelectTeam();"> 
                           Share with Team
                         </label>
 
                         <div id="createNewListSelectTeam" class="AIPRM__hidden">
-                          <select id="createNewListSelectTeam" name="createNewListSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full">
+                          <select id="createNewListSelectTeam" name="createNewListSelectTeam" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full">
                             ${
                               this.Client.OwnTeamS?.length > 0
                                 ? this.Client.OwnTeamS.map(
@@ -8423,7 +8442,7 @@ ${textContent}
                     }
                 </div>
 
-                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+                <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
                   <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
                           onclick="AIPRM.hideModal('listCreateModal')"> Cancel
                   </button>
@@ -8686,14 +8705,14 @@ ${textContent}
 
     accountModal.innerHTML = /*html*/ `
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
-        <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+        <div class="AIPRM__absolute AIPRM__bg-black/50 dark:AIPRM__bg-black/80 AIPRM__inset-0">
         </div>
 
         <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
           <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
 
             <div
-              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-900 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
               role="dialog" aria-modal="true" aria-labelledby="modal-headline">
 
                 <div class="AIPRM__border-b dark:AIPRM__border-gray-700 AIPRM__px-6 AIPRM__flex AIPRM__w-full AIPRM__flex-row AIPRM__items-center AIPRM__justify-between">
@@ -8706,7 +8725,7 @@ ${textContent}
                   </button>
                 </div>                
           
-                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__p-4 AIPRM__px-6 AIPRM__overflow-y-auto">
+                <div class="AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__p-4 AIPRM__px-6 AIPRM__overflow-y-auto">
 
                   <dl class="AIPRM__text-sm">
                     <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
@@ -8722,15 +8741,15 @@ ${textContent}
                         ${
                           this.Client.User.IsLinked
                             ? /*html*/ `
-                              <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}" target="_blank">
+                              <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-900 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}" target="_blank">
                                 View Account
                               </a>
-                              <button class="AIPRM__block sm:AIPRM__inline-block sm:AIPRM__ml-2 AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-red-500 hover:AIPRM__border-red-700 AIPRM__text-red-500 hover:AIPRM__text-red-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-red-400 dark:hover:AIPRM__border-red-400" onclick="AIPRM.disconnectAccount()">
+                              <button class="AIPRM__block sm:AIPRM__inline-block sm:AIPRM__ml-2 AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-red-500 hover:AIPRM__border-red-700 AIPRM__text-red-500 hover:AIPRM__text-red-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-900 dark:hover:AIPRM__text-red-400 dark:hover:AIPRM__border-red-400" onclick="AIPRM.disconnectAccount()">
                                 Disconnect
                               </button>
                             `
                             : /*html*/ `
-                              <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}?action=connect" target="_blank">
+                              <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-900 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}?action=connect" target="_blank">
                                 Connect
                               </a>
                             `
@@ -8753,7 +8772,7 @@ ${textContent}
                     <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
                       <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">AIPRM Teams</dt>
                       <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
-                          <a class="AIPRM__inline-block AIPRM__mt-1 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppTeamURL}" target="_blank">
+                          <a class="AIPRM__inline-block AIPRM__mt-1 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-900 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppTeamURL}" target="_blank">
                             Manage My Teams
                           </a>
                       </dd>
@@ -8766,7 +8785,7 @@ ${textContent}
                           ${this.Client.UserQuota.getMaxPlanLevelLabel()}
                         </div>
 
-                        <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppPricingURL}" target="_blank">
+                        <a class="AIPRM__inline-block AIPRM__mt-4 AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-900 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppPricingURL}" target="_blank">
                           Upgrade
                         </a>
                       </dd>
@@ -8775,7 +8794,7 @@ ${textContent}
                     <div class="AIPRM__flex AIPRM__py-4 AIPRM__flex-col sm:AIPRM__flex-row AIPRM__border-b dark:AIPRM__border-gray-700">
                       <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">My Profile Info</dt>
                       <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
-                        <a class="AIPRM__inline-block AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-800 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}#myprofileinfo" target="_blank">
+                        <a class="AIPRM__inline-block AIPRM__bg-white AIPRM__border AIPRM__border-green-500 hover:AIPRM__border-green-700 AIPRM__text-green-500 hover:AIPRM__text-green-700 AIPRM__py-2 AIPRM__px-3 AIPRM__rounded dark:AIPRM__bg-gray-900 dark:hover:AIPRM__text-green-400 dark:hover:AIPRM__border-green-400" href="${AppAccountURL}#myprofileinfo" target="_blank">
                           Manage My Profile Info
                         </a>
                       </dd>
@@ -8785,7 +8804,7 @@ ${textContent}
                       <dt class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__font-medium">Settings</dt>
                       <dd class="AIPRM__w-full sm:AIPRM__w-1/2 AIPRM__py-2 AIPRM__justify-between">
                         <label class="AIPRM__text-sm AIPRM__flex AIPRM__items-center" id="savePromptForm-public-checkbox">
-                          <input id="accountModal-hideWatermark" type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-700" 
+                          <input id="accountModal-hideWatermark" type="checkbox" class="AIPRM__mr-2 dark:AIPRM__bg-gray-850" 
                             onchange="AIPRM.toggleHideAIPRMWatermark()" ${
                               this.getHideWatermark() ? 'checked' : ''
                             }> 

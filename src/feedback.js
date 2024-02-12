@@ -32,16 +32,16 @@ const createReportPromptModal = function (prompt, reportPrompt) {
 
   reportPromptModal.innerHTML = /*html*/ `
       <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__text-center AIPRM__transition-opacity AIPRM__z-50">
-        <div class="AIPRM__absolute AIPRM__bg-gray-900 AIPRM__inset-0 AIPRM__opacity-90">
+        <div class="AIPRM__absolute AIPRM__bg-black/50 dark:AIPRM__bg-black/80 AIPRM__inset-0">
         </div>
 
         <div class="AIPRM__fixed AIPRM__inset-0 AIPRM__overflow-y-auto">
           <div class="AIPRM__flex AIPRM__items-center AIPRM__justify-center AIPRM__min-h-full">
             <div
-              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-800 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
+              class="AIPRM__align-center AIPRM__bg-white dark:AIPRM__bg-gray-900 dark:AIPRM__text-gray-200 AIPRM__inline-block AIPRM__overflow-hidden sm:AIPRM__rounded-lg AIPRM__shadow-xl sm:AIPRM__align-middle sm:AIPRM__max-w-lg sm:AIPRM__my-8 sm:AIPRM__w-full AIPRM__text-left AIPRM__transform AIPRM__transition-all"
               role="dialog" aria-modal="true" aria-labelledby="modal-headline">
 
-              <div class="AIPRM__bg-white dark:AIPRM__bg-gray-800 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4">
+              <div class="AIPRM__bg-white dark:AIPRM__bg-gray-900 AIPRM__px-4 AIPRM__pt-5 AIPRM__pb-4 sm:AIPRM__p-6 sm:AIPRM__pb-4">
 
                 <div id="reportPromptIntroText">
                   <p class="AIPRM__mb-6">
@@ -58,7 +58,7 @@ const createReportPromptModal = function (prompt, reportPrompt) {
 
                   <div class="AIPRM__mt-2">
                     <label for="FeedbackTypeNo" class="AIPRM__block">What would you like to report?</label>
-                    <select data-prompt-id="${prompt.ID}" id="FeedbackTypeNo" name="FeedbackTypeNo" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 dark:hover:AIPRM__bg-gray-900 AIPRM__rounded AIPRM__w-full" required>
+                    <select data-prompt-id="${prompt.ID}" id="FeedbackTypeNo" name="FeedbackTypeNo" class="AIPRM__mt-2 AIPRM__mb-3 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-850 dark:hover:AIPRM__bg-gray-800 AIPRM__rounded AIPRM__w-full" required>
                       <option value="${FeedbackTypeNo.GENERIC_LEGAL_CONCERN}">
                       Legal concerns
                       </option>
@@ -81,7 +81,7 @@ const createReportPromptModal = function (prompt, reportPrompt) {
                 <div class="reportPromptFeedbackContainer AIPRM__hidden AIPRM__overflow-y-auto" id="reportPromptFeedbackForm"></div>
               </div>
 
-              <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-700 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
+              <div class="AIPRM__bg-gray-200 dark:AIPRM__bg-gray-850 AIPRM__px-4 AIPRM__py-3 AIPRM__text-right">
                 <button type="button" class="AIPRM__bg-gray-600 hover:AIPRM__bg-gray-800 AIPRM__mr-2 AIPRM__px-4 AIPRM__py-2 AIPRM__rounded AIPRM__text-white"
                         onclick="AIPRM.hideModal('reportPromptModal')"> Cancel
                 </button>
@@ -192,7 +192,7 @@ const getFeedbackFormTemplate = (selectedFeedbackTypeNo, promptID) => {
       <input name="FeedbackContact" 
         ${requiresFeedbackContactText ? ' required ' : ''} type="email"
         title="Email address to contact you in case we need more information"
-        class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
+        class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3"
         placeholder="example@example.com" />
 
       <label>Feedback${
@@ -203,7 +203,7 @@ const getFeedbackFormTemplate = (selectedFeedbackTypeNo, promptID) => {
       <textarea name="FeedbackText" 
         ${requiresFeedbackContactText ? ' required ' : ''}
         title="Short description of the issue"
-        class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 140px;"
+        class="AIPRM__w-full AIPRM__bg-gray-100 dark:AIPRM__bg-gray-850 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-2 AIPRM__mt-2 AIPRM__mb-3" style="height: 140px;"
         placeholder="Please describe the issue you are having with this prompt.${
           selectedFeedbackTypeNo === FeedbackTypeNo.GENERIC_CONCERN
             ? ' Please include your full history of the prompt including the original prompt used.'

@@ -31,7 +31,7 @@ export class PromptBuilder {
     return /*html*/ `
       <div>Prompt Builder</div>
 
-      <div class="AIPRM__w-full AIPRM__bg-gray-100 AIPRM__border-gray-500 AIPRM__border dark:AIPRM__bg-gray-700 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-4 AIPRM__mt-2 AIPRM__mb-3" id="AIPRM__PromptBuilder-Prompt">
+      <div class="AIPRM__w-full AIPRM__bg-gray-100 AIPRM__border-gray-500 AIPRM__border dark:AIPRM__bg-gray-800 dark:AIPRM__border-gray-700 AIPRM__rounded AIPRM__p-4 AIPRM__mt-2 AIPRM__mb-3" id="AIPRM__PromptBuilder-Prompt">
         <div class="AIPRM__flex AIPRM__gap-2 AIPRM__items-end">
           <span class="AIPRM__whitespace-nowrap">You are </span>
 
